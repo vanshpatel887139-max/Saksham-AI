@@ -45,7 +45,7 @@ def list_courses(user_id: str = ""):
 def course_detail(course_id: str, user_id: str = ""):
     conn = get_db_connection()
     try:
-        row = conn.execute("SELECT * FROM courses WHERE id = ?", (course_id,)).fetchone()
+        row = conn.execute("SELECT * FROM courses WHERE id = ? OR course_code = ?", (course_id, course_id)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Course not found")
         course = row_to_course(row)
@@ -76,7 +76,7 @@ def enroll(req: EnrollRequest):
     conn = get_db_connection()
     try:
         user = conn.execute("SELECT id FROM users WHERE id = ?", (req.user_id,)).fetchone()
-        course = conn.execute("SELECT id FROM courses WHERE id = ?", (req.course_id,)).fetchone()
+        course = conn.execute("SELECT id FROM courses WHERE id = ? OR course_code = ?", (req.course_id, req.course_id)).fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         if not course:
@@ -112,7 +112,7 @@ def complete_module(req: ModuleCompleteRequest):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         course_row = conn.execute(
-            "SELECT * FROM courses WHERE id = ?", (req.course_id,)
+            "SELECT * FROM courses WHERE id = ? OR course_code = ?", (req.course_id, req.course_id)
         ).fetchone()
         if not course_row:
             raise HTTPException(status_code=404, detail="Course not found")

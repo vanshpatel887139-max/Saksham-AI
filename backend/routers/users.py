@@ -74,6 +74,10 @@ def update_user(user_id: str, updates: ProfileUpdate):
                 if isinstance(val, bool):
                     val = 1 if val else 0
                 params.append(val)
+        if not sets:
+            full = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            return user_to_dict(full, conn)
+
         params.append(user_id)
         conn.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", params)
         conn.commit()

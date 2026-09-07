@@ -34,7 +34,7 @@ export default function QuizGeneratorPage() {
     try {
       if (inputMethod === 'upload' && uploadedFile) {
         const ext = (uploadedFile.name.split('.').pop() || '').toLowerCase();
-        if (['pdf', 'docx', 'pptx', 'ppt'].includes(ext)) {
+        if (['pdf', 'docx', 'pptx', 'ppt', 'srt', 'vtt'].includes(ext)) {
           // real text extraction on the backend
           const generated = await apiGenerateQuizFromFile(uploadedFile, questionCount, difficulty);
           setQuestions(generated.questions);

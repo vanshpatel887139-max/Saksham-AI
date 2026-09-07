@@ -94,7 +94,7 @@ def forecast():
         compl_pts = [{"y": e["completions"]} for e in engagement]
         readiness_pts = [{"y": v} for v in readiness]
 
-        future_trend = linear_forecast(hours_pts + compl_pts)
+        future_trend = linear_forecast(hours_pts)
         readiness_trend = linear_forecast(readiness_pts)
 
         return {
