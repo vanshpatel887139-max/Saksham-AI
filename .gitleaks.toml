@@ -1,0 +1,178 @@
+# gitleaks configuration for SakshamAI
+#
+# Run manually:
+#   gitleaks detect --source . --config .gitleaks.toml
+# or let .pre-commit-config.yaml run it on every commit.
+#
+# ---------------------------------------------------------------------------
+# Why this file does NOT use `[extend] useDefault = true`
+# ---------------------------------------------------------------------------
+# It was tried and measured. gitleaks' bundled default ruleset ships a global
+# allowlist that silently suppresses *newly added* custom rules: an identical
+# rule and regex that matched when the config stood alone stopped matching the
+# moment useDefault was enabled. Verified A/B:
+#
+#   [extend] useDefault = true  + rule "sb-test"  -> no match
+#   no extend           + rule "sb-test"  -> match
+#
+# A scanner that ignores half its own config is not a scanner. So every rule
+# here is declared explicitly and each was verified to fire before being kept.
+#
+# Measured coverage of the stock ruleset, for reference (what we would have
+# relied on with useDefault): caught stripe / slack / sendgrid / github / jwt;
+# missed postgres URIs with inline passwords, supabase sb_ keys, groq gsk_
+# keys, and AWS access key ids. Those four are the ones that matter most for
+# this repository, hence the custom rules below.
+
+# ---------------------------------------------------------------------------
+# Provider keys
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "jwt"
+description = "JSON Web Token — covers Supabase anon and access tokens"
+regex = '''eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'''
+keywords = ["eyJ"]
+
+[[rules]]
+id = "supabase-secret-key"
+description = "Supabase secret (service_role) or publishable key"
+regex = '''sb_(?:secret|publishable)_[A-Za-z0-9_-]{16,}'''
+secretGroup = 0
+keywords = ["sb_secret_", "sb_publishable_"]
+
+[[rules]]
+id = "stripe-key"
+description = "Stripe secret or publishable key"
+regex = '''(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{10,}'''
+secretGroup = 0
+keywords = ["sk_live_", "sk_test_", "pk_live_", "pk_test_", "rk_live_"]
+
+[[rules]]
+id = "groq-api-key"
+description = "Groq API key (GROQ_API_KEY)"
+regex = '''gsk_[A-Za-z0-9]{32,}'''
+secretGroup = 0
+keywords = ["gsk_"]
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API key"
+regex = '''sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}'''
+secretGroup = 0
+keywords = ["sk-"]
+
+[[rules]]
+id = "aws-access-key-id"
+description = "AWS access key identifier"
+regex = '''(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}'''
+secretGroup = 0
+keywords = ["AKIA", "ASIA", "ABIA", "ACCA", "A3T"]
+
+[[rules]]
+id = "github-token"
+description = "GitHub personal access / app token"
+regex = '''gh[pousr]_[A-Za-z0-9]{20,}'''
+secretGroup = 0
+keywords = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
+
+[[rules]]
+id = "slack-token"
+description = "Slack bot / user token"
+regex = '''xox[abposr]-[A-Za-z0-9-]{10,}'''
+secretGroup = 0
+keywords = ["xoxa-", "xoxb-", "xoxp-", "xoxs-", "xoxr-"]
+
+[[rules]]
+id = "sendgrid-api-token"
+description = "SendGrid API token"
+regex = '''SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}'''
+secretGroup = 0
+keywords = ["SG."]
+
+[[rules]]
+id = "generic-credential-literal"
+description = "A password/secret/API key assigned as a literal in code or config"
+regex = '''(?i)(?:pass(?:word|wd)|secret|api[_-]?key|auth[_-]?token|access[_-]?token)\s*[:=]\s*["'][^"'\s]{8,}["']'''
+secretGroup = 0
+keywords = ["password", "passwd", "secret", "api_key", "apikey", "auth_token", "access_token"]
+
+# ---------------------------------------------------------------------------
+# Connection strings and private material
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "postgres-uri-with-credentials"
+description = "PostgreSQL URI carrying an inline password (DATABASE_URL)"
+regex = '''(?i)postgres(?:ql)?://[^\s:/@'\"]+:[^\s:/@'\"]+@[^\s'\"]+'''
+secretGroup = 0
+keywords = ["postgres://", "postgresql://"]
+
+[[rules]]
+id = "mongodb-uri-with-credentials"
+description = "MongoDB URI carrying an inline password"
+regex = '''mongodb(?:\+srv)?://[^\s:/@'\"]+:[^\s:/@'\"]+@[^\s'\"]+'''
+secretGroup = 0
+keywords = ["mongodb://", "mongodb+srv://"]
+
+[[rules]]
+id = "private-key-block"
+description = "PEM private key"
+regex = '''-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----'''
+secretGroup = 0
+keywords = ["PRIVATE KEY"]
+
+# ---------------------------------------------------------------------------
+# Allowlist — deliberately minimal, and every entry is a known non-secret
+# ---------------------------------------------------------------------------
+# Anything not named here fails the commit. This is the complete list of
+# exemptions; there is no catch-all.
+#
+# 1. `Demo@1234`, a known-public demo credential compiled into the shipped
+#    bundle by design (see the comment above DEMO_LOGINS).
+#
+#    The exemption is on the VALUE, deliberately, with no `paths` restriction.
+#    gitleaks treats `paths` and `regexes` in one allowlist entry as
+#    alternatives, not a conjunction, so pairing them exempts the WHOLE FILE:
+#    that was measured here. With the old paths+regexes entry, pasting
+#    `password = ...` into src/services/appService.ts produced
+#    "no leaks found" — a blind spot in the one file most likely to collect
+#    pasted credentials. Matching on the value alone keeps the guarantee that
+#    actually holds and is worth making: the exact demo string is tolerated
+#    wherever it appears, and every other credential literal in that file is
+#    still caught by the generic-credential-literal rule above. Both
+#    directions were verified.
+#    DELETE THIS ALLOWLIST in the same commit that removes DEMO_LOGINS.
+# 2. .env.example is a tracked template of placeholders (PROJECT_REF,
+#    PASSWORD, change-me-for-the-demo). It has to stay committable or the
+#    template is useless — and a placeholder is not a credential.
+
+[[allowlists]]
+description = "Known-public demo credential, matched on the value alone"
+regexes = ['''Demo@1234''']
+
+[[allowlists]]
+description = "Tracked template of placeholders, not real values"
+paths = ['''^\.env\.example$''']
+
+# ---------------------------------------------------------------------------
+# Vendored dependencies and build output
+# ---------------------------------------------------------------------------
+# gitleaks does not read .gitignore, so these are excluded explicitly. They are
+# third-party code or regenerable artefacts, never hand-written source:
+#   backend/.venv  — pydantic's docstrings contain example postgres:// URIs,
+#                    PIL ships a font bitmap that pattern-matches an AWS key
+#                    id, cryptography defines the PEM header constant.
+#   node_modules, dist — installed packages and the built bundle (whose real
+#                    source of truth, src/, is still scanned).
+# Excluding these also keeps the pre-commit hook fast.
+# Nothing under src/, backend/*.py, backend/routers/ or scripts/ is excluded.
+[[allowlists]]
+description = "Vendored dependencies and build output"
+paths = [
+  '''(^|/)node_modules/''',
+  '''^backend/\.venv/''',
+  '''(^|/)__pycache__/''',
+  '''\.pyc$''',
+  '''^dist/''',
+]

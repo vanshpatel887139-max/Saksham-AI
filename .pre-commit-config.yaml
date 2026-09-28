@@ -1,0 +1,21 @@
+# Secret scanning. Runs gitleaks against the staged changes on every commit,
+# so a credential cannot be committed by accident.
+#
+#   pipx install pre-commit   (or: pip install pre-commit)
+#   pre-commit install
+#   pre-commit run --all-files
+#
+# Requires the gitleaks binary on PATH:
+#   macOS (Homebrew):  brew install gitleaks
+#   any platform:      https://github.com/gitleaks/gitleaks/releases
+#
+# Rule set and rationale live in .gitleaks.toml — read that first, it explains
+# why the stock ruleset was not used and which exemptions exist.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        # The upstream hook already supplies `git --pre-commit --redact
+        # --staged`; only the config path needs adding.
+        args: ['--config=.gitleaks.toml']

@@ -1,0 +1,127 @@
+# Render blueprint for the SakshamAI API.
+#
+# The service is named `sakshamai-api` on purpose: vercel.json routes /api/* to
+# https://sakshamai-api.onrender.com, so the two files agree by construction. If
+# you rename the service here, change that destination too — and if you forget,
+# every API call fails with a DNS error rather than quietly reaching the wrong
+# host, which is the failure mode you want.
+#
+# `rootDir` is deliberately NOT set. database.py resolves its migrations as
+# BACKEND_DIR.parent / "supabase" / "migrations", and init_db() runs in the
+# FastAPI lifespan, so the whole repository has to be present at boot. Pointing
+# Render's root directory at `backend/` would leave that path outside the
+# service and the app would refuse to start. Instead the commands run from the
+# repository root and `cd` into backend/ for the server, which is also how it
+# runs locally — uvicorn puts the working directory on sys.path, so the
+# backend's bare `from log_safety import ...` imports resolve.
+
+services:
+  - type: web
+    name: sakshamai-api
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r backend/requirements.txt
+    # $PORT is injected by Render. Never hardcode a port.
+    #
+    # No --workers flag, deliberately. rate_limit.py and the sign-in throttles
+    # keep their counters in a per-process dict, so a second worker silently
+    # doubles the effective limit. WEB_CONCURRENCY below pins that to one
+    # process, and deploy_config.py raises the check if it is ever changed.
+    startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
+    # This endpoint performs a real database round trip and returns 503 when the
+    # database is unreachable. That is the behaviour we want: Render must not
+    # route traffic to an instance that cannot serve a request. The cost is that
+    # a paused free Supabase project fails the health check — restore the
+    # project and the instance recovers without a redeploy.
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+    envVars:
+      # --- non-secret, safe to commit -------------------------------------
+      - key: SAKSHAMAI_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: "3.13.6"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: ACCESS_LOG_REDACT
+        value: "true"
+      - key: EXPOSE_DEMO_PASSWORD
+        value: "false"
+      # Which seeded personas the public login-screen picker advertises. Only
+      # the two with a real Supabase Auth identity can complete a sign-in, so
+      # listing the rest produced buttons that 401'd. Presentation only — it
+      # grants no access. Unset in the dashboard to accept the built-in default.
+      - key: DEMO_ACCOUNT_IDS
+        value: "admin-1,learner-1"
+      - key: DB_POOL_MAX
+        value: "10"
+      - key: DB_CONNECT_TIMEOUT_SECONDS
+        value: "10"
+      # Which signed-in addresses may be auto-linked to a `users` row.
+      # Sign-in does `UPDATE users SET auth_id = ... WHERE email = %s`, so the
+      # credential chooses the account. Supabase projects have public sign-up
+      # enabled by default and the anon key is public, so without this list
+      # anyone could register an address and claim the matching profile. Seed
+      # accounts only, and add real staff emails here as they are provisioned.
+      - key: AUTH_LINK_ALLOWLIST
+        value: "admin-1@sakshamai.demo,learner-1@sakshamai.demo"
+      # uvicorn only honours X-Forwarded-For from a trusted proxy. Render's
+      # proxy is not trusted by default, so request.client.host is the proxy
+      # for every request and the sign-in limiter becomes one global bucket:
+      # five failed attempts from anyone locks out every user. '*' is correct
+      # here specifically because Render is the only thing that can reach the
+      # service. Deploying somewhere the container is also directly reachable
+      # means replacing this with the proxy's address or CIDR instead.
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"
+
+      # --- deployment-specific, Render will prompt for the value -----------
+      # The Vercel production origin. Must be listed even though traffic is
+      # same-origin through the rewrite: the CSRF origin guard compares the
+      # browser's Origin header against this list on every state-changing
+      # cookie-authenticated request, and refusing to boot on a wildcard is the
+      # point of the check.
+      - key: CORS_ORIGINS
+        sync: false
+
+      # Host header values the service will answer to. The Render service
+      # hostname is the one that matters. If TrustedHostMiddleware returns 400
+      # through the Vercel proxy, add the Vercel hostname here as well: whether
+      # Vercel forwards the original Host or the destination's is a proxy
+      # detail, and listing both costs nothing.
+      - key: ALLOWED_HOSTS
+        sync: false
+
+      # --- secrets, never committed ----------------------------------------
+      # Supabase session-pooler string, not the direct connection: Render opens
+      # connections per deploy and per worker, and the direct port has a low
+      # connection ceiling. sslmode=require is checked at startup in
+      # production and the app refuses to boot without it.
+      - key: DATABASE_URL
+        sync: false
+
+      - key: SUPABASE_URL
+        sync: false
+
+      - key: SUPABASE_ANON_KEY
+        sync: false
+
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+      # Optional. Without it the AI advisor, quiz generation and gap analysis
+      # fall back to deterministic logic and the rest of the app works. Set it
+      # if the demo needs the live model.
+      - key: GROQ_API_KEY
+        sync: false
+
+      # Do NOT set DEMO_USER_PASSWORD here. It exists so scripts/seed_auth_users.py
+      # can create the demo accounts locally; it is not a runtime secret.
+      # Demo@1234 is published in README.md and allowlisted by value in
+      # .gitleaks.toml, so it is a public string that opens a real admin session
+      # against a real database. deploy_config.py now refuses to boot in
+      # production if it is set to that value or to anything under 12
+      # characters, so a copied-from-.env.example deploy fails loudly instead of
+      # shipping a guessable administrator password.

@@ -1,0 +1,54 @@
+#!/bin/sh
+# Secret scan on commit. Dependency-free alternative to .pre-commit-config.yaml,
+# for when pre-commit is not installed. Enablement is opt-in:
+#
+#   git config core.hooksPath .githooks
+#
+# Scans staged content for hardcoded secrets using .gitleaks.toml. Blocked
+# commits print the offending rule and file; nothing is ever modified here.
+#
+# The gate is unconditional and fails CLOSED. A missing gitleaks binary blocks
+# the commit rather than warning and waving it through, because the case this
+# protects is a fresh clone or a new machine -- exactly where the binary is
+# least likely to be installed, and exactly where someone is most likely to
+# paste a key and commit. A gate you can walk through by uninstalling a tool
+# is not a gate. The escape hatch is CI plus a scoped allowlist entry, both
+# documented in README.md; never bypass by disabling the hook.
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "" >&2
+    echo "COMMIT BLOCKED: gitleaks not found on PATH, so the secret scan cannot run." >&2
+    echo "This hook fails closed on purpose - it will not let a commit through unscanned." >&2
+    echo "" >&2
+    echo "Install it, then retry:" >&2
+    echo "  macOS (Homebrew):  brew install gitleaks" >&2
+    echo "  any platform:      https://github.com/gitleaks/gitleaks/releases" >&2
+    echo "" >&2
+    echo "To scan without installing it, use .pre-commit-config.yaml instead" >&2
+    echo "(pipx install pre-commit && pre-commit install), or push and let the" >&2
+    echo "secret-scan workflow check it." >&2
+    echo "" >&2
+    exit 1
+fi
+
+if [ -z "$(git diff --cached --name-only)" ]; then
+    exit 0
+fi
+
+if gitleaks git --pre-commit --redact --staged --config=.gitleaks.toml >/dev/null 2>&1; then
+    exit 0
+fi
+
+echo "" >&2
+echo "COMMIT BLOCKED: possible secret(s) detected in staged changes." >&2
+echo "Run 'gitleaks detect --source . --config .gitleaks.toml' for detail," >&2
+echo "then move the value into an environment variable." >&2
+echo "" >&2
+echo "If this is a false positive, add a scoped entry to the allowlist" >&2
+echo "section of .gitleaks.toml - do not disable the scan." >&2
+echo "" >&2
+exit 1
