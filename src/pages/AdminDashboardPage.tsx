@@ -7,8 +7,8 @@ import { Users, BookOpen, Clock, TrendingUp, AlertTriangle, Search } from 'lucid
 import { useState } from 'react';
 
 const deptScores = [
-  { dept: 'NSSO', avgCompetency: 2.7 },
-  { dept: 'Census', avgCompetency: 2.6 },
+  { dept: 'National Sample Survey Office', avgCompetency: 2.7 },
+  { dept: 'Census Division', avgCompetency: 2.6 },
   { dept: 'DGCIS', avgCompetency: 3.3 },
   { dept: 'NSSTA', avgCompetency: 3.9 },
 ];
@@ -40,19 +40,26 @@ export default function AdminDashboardPage() {
     return true;
   });
 
+  const totalOfficials = mockOrgLearners.length;
+  const activeCount = mockOrgLearners.filter(l => l.status === 'Active').length;
+  const avgCompleted = mockOrgLearners.reduce((a, l) => a + l.completed, 0) / mockOrgLearners.length;
+  const maxCompleted = Math.max(...mockOrgLearners.map(l => l.completed));
+  const completionRate = Math.round((avgCompleted / maxCompleted) * 100);
+  const highGapCount = mockOrgLearners.filter(l => l.gaps >= 4).length;
+
   const stats = [
-    { icon: Users, label: 'Total Officials', value: 156, color: 'text-navy-600', bg: 'bg-navy-50' },
-    { icon: BookOpen, label: 'Active Learners', value: 89, color: 'text-green-600', bg: 'bg-green-50' },
-    { icon: TrendingUp, label: 'Completion Rate', value: '68%', color: 'text-saffron-600', bg: 'bg-saffron-50' },
-    { icon: Clock, label: 'Total Learning Hours', value: '1,240', color: 'text-blue-600', bg: 'bg-blue-50' },
-    { icon: AlertTriangle, label: 'High-Priority Gaps', value: 34, color: 'text-red-600', bg: 'bg-red-50' },
+    { icon: Users, label: 'Total Officials', value: totalOfficials, color: 'text-navy-600', bg: 'bg-navy-50' },
+    { icon: BookOpen, label: 'Active Learners', value: activeCount, color: 'text-green-600', bg: 'bg-green-50' },
+    { icon: TrendingUp, label: 'Completion Rate', value: `${completionRate}%`, color: 'text-saffron-600', bg: 'bg-saffron-50' },
+    { icon: Clock, label: 'Avg Courses Completed', value: avgCompleted.toFixed(1), color: 'text-blue-600', bg: 'bg-blue-50' },
+    { icon: AlertTriangle, label: 'High-Priority Gaps', value: highGapCount, color: 'text-red-600', bg: 'bg-red-50' },
   ];
 
   const gapDistribution = [
-    { name: 'High', value: 34 },
-    { name: 'Medium', value: 48 },
-    { name: 'Low', value: 62 },
-    { name: 'No Gap', value: 124 },
+    { name: 'High', value: mockOrgLearners.filter(l => l.gaps >= 4).length },
+    { name: 'Medium', value: mockOrgLearners.filter(l => l.gaps === 3).length },
+    { name: 'Low', value: mockOrgLearners.filter(l => l.gaps === 2).length },
+    { name: 'No Gap', value: mockOrgLearners.filter(l => l.gaps <= 1).length },
   ];
 
   return (
@@ -61,7 +68,7 @@ export default function AdminDashboardPage() {
       <div className="p-6 space-y-6">
         <div className="bg-gradient-to-r from-navy-800 to-navy-900 rounded-2xl p-6 text-white">
           <h2 className="text-xl font-bold mb-1">Organization Overview</h2>
-          <p className="text-navy-200 text-sm">Skill intelligence across {user?.department || 'NSSO'} — 156 officials tracked</p>
+          <p className="text-navy-200 text-sm">Skill intelligence across {user?.department || 'National Sample Survey Office'} — {totalOfficials} officials tracked</p>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -93,7 +100,7 @@ export default function AdminDashboardPage() {
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={deptScores}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="dept" tick={{ fontSize: 11 }} />
+                <XAxis dataKey="dept" tick={{ fontSize: 9 }} interval={0} />
                 <YAxis domain={[0, 5]} tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Bar dataKey="avgCompetency" fill="#f97316" radius={[4, 4, 0, 0]} />
@@ -151,8 +158,8 @@ export default function AdminDashboardPage() {
               </div>
               <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)} className="px-3 py-1.5 border border-navy-200 rounded-lg text-xs bg-white">
                 <option value="all">All Departments</option>
-                <option value="NSSO">NSSO</option>
-                <option value="Census Division">Census</option>
+                <option value="National Sample Survey Office">National Sample Survey Office</option>
+                <option value="Census Division">Census Division</option>
                 <option value="DGCIS">DGCIS</option>
                 <option value="NSSTA">NSSTA</option>
               </select>

@@ -1,10 +1,46 @@
-"""SQLite database setup, schema, and seed data for SakshamAI."""
+"""PostgreSQL (Supabase) access layer for SakshamAI.
 
-import sqlite3
+The schema, migrations and seed live in supabase/migrations/*.sql. This module
+owns exactly three things: a connection pool, the migration runner, and the
+canonical reference data that scripts/export_seed.py generates the seed from.
+
+Previously this was a local SQLite file (sakshamai.db), which meant data only
+existed on one machine and vanished on re-clone. Everything now lives in
+Supabase, so any device sees the same rows.
+
+Why psycopg and not supabase-py: the backend is raw SQL throughout (108
+execute() calls). supabase-py goes through PostgREST, which has no
+multi-statement transactions — and routers/assessment.py::_persist_questions
+does a DELETE followed by 18 INSERTs that must land atomically. A direct
+connection keeps the SQL as SQL. See supabase/migrations/002_rls.sql for why
+this also means RLS is not the active access-control boundary.
+
+The pool deliberately runs in psycopg's default mode (autocommit off) so that
+the explicit conn.commit() calls already scattered through the routers keep
+their meaning, and conn.close() returns the connection to the pool.
+"""
+
 import json
+import logging
+import os
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "sakshamai.db"
+from psycopg import OperationalError
+from psycopg.pq import TransactionStatus
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
+from log_safety import safe_exception
+
+logger = logging.getLogger("sakshamai.db")
+
+BACKEND_DIR = Path(__file__).parent
+MIGRATIONS_DIR = BACKEND_DIR.parent / "supabase" / "migrations"
+
+_pool: ConnectionPool | None = None
+
+
+class DatabaseNotConfigured(RuntimeError):
+    """Raised when DATABASE_URL is missing, with the fix in the message."""
 
 # ---------------------------------------------------------------- competencies
 # (id, name, category, description)
@@ -389,7 +425,7 @@ LABS = [
          {"title": "Statistics", "code": "import statistics\nvalues = [3.1, 2.8, 3.6, 3.9, 2.4]\nprint('Mean:', statistics.mean(values))\nprint('Median:', statistics.median(values))\nprint('Variance:', round(statistics.variance(values), 3))"},
      ])),
     ("lab-sql", "SQL Query Lab", "Technical",
-     "Query a real district-level census dataset with SELECT, WHERE, GROUP BY and JOIN.",
+     "Write SQL against real World Bank India statistics - SELECT, WHERE, ORDER BY and aggregates, with errors reported instead of silent failure.",
      "🗃️", json.dumps([
          {"table": "districts", "rows": [["id", "name", "state", "population", "literacy"], [1, "Alwar", "Rajasthan", 3674179, 70.7], [2, "Mysuru", "Karnataka", 3054822, 72.6], [3, "Nashik", "Maharashtra", 6109052, 80.9], [4, "Ludhiana", "Punjab", 3498739, 82.2], [5, "Varanasi", "Uttar Pradesh", 3676841, 70.3], [6, "Thrissur", "Kerala", 3121200, 95.1]]},
          {"table": "samples", "rows": [["district_id", "households_surveyed", "dept"], [1, 420, "NSSO"], [2, 515, "Census"], [3, 310, "NSSTA"], [4, 600, "NSSO"], [5, 275, "Census"], [6, 505, "NSSTA"]]},
@@ -425,255 +461,402 @@ ORG_LEARNERS = [
 ]
 
 
-def _columns(conn, table):
-    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+# ---------------------------------------------------------------- connection
+def _reset_connection(conn) -> None:
+    """Return a connection to the pool in a known-clean state.
+
+    psycopg runs with autocommit off, so any statement leaves the connection
+    INTRANS. The pool's built-in reset rolls that back but logs a WARNING per
+    return ("rolling back returned connection"), which floods the logs on a
+    busy API. Rolling back here keeps the behaviour and drops the noise.
+    """
+    try:
+        if conn.info.transaction_status != TransactionStatus.IDLE:
+            conn.rollback()
+    except Exception:
+        # A connection we cannot reset is not safe to reuse; let the pool
+        # discard it rather than handing it to the next request.
+        raise
 
 
-def get_db_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+def _check_connection(conn) -> bool:
+    """Tell the pool whether a reused connection is still usable.
+
+    The contract is *raise*, not return: psycopg-pool's
+    `_getconn_with_check_loop` does `try: self._check_connection(conn) /
+    except Exception: self._putconn(conn); <loop for another one> /
+    else: return conn`. A callback that returns False is ignored and the
+    connection is handed out anyway, so a False return here would look correct
+    and do nothing.
+
+    Raising instead makes the pool discard the dead session and transparently
+    fetch another, which is what turns an intermittent 500 into a request that
+    simply succeeds.
+
+    The probe is a bare `SELECT 1` for the cheapest possible round trip.
+    """
+    try:
+        conn.execute("SELECT 1")
+    except Exception as exc:
+        raise OperationalError("pooled connection failed its liveness check") from exc
+    return True
+
+
+def get_pool() -> ConnectionPool:
+    """Build the shared connection pool on first use.
+
+    Lazy so that importing this module — which scripts/export_seed.py does to
+    read the reference constants — never requires a reachable database.
+    """
+    global _pool
+    if _pool is None:
+        dsn = (os.environ.get("DATABASE_URL") or "").strip()
+        if not dsn:
+            raise DatabaseNotConfigured(
+                "DATABASE_URL is not set. Copy .env.example to backend/.env and fill in "
+                "the Supabase session-pooler connection string, then restart the backend."
+            )
+        # Without a connect timeout, a blackholed database host (firewall DROP
+        # rather than REJECT) leaves the TCP handshake pending forever. The
+        # request thread never returns, so a single bad packet-either-drops the
+        # worker instead of producing a 500 the load balancer can route around.
+        # An unreachable DB should be a fast, visible error.
+        connect_timeout = _positive_int("DB_CONNECT_TIMEOUT_SECONDS", 10)
+        pool_max = _positive_int("DB_POOL_MAX", 10)
+        _pool = ConnectionPool(
+            dsn,
+            min_size=1,
+            max_size=pool_max,
+            open=False,
+            kwargs={
+                "row_factory": dict_row,
+                "connect_timeout": connect_timeout,
+            },
+            reset=_reset_connection,
+            # A pooled connection that the *server* has closed is still handed
+            # back out by the pool, because the pool cannot tell the difference
+            # between "idle" and "idle to a server that dropped it". Supabase's
+            # pooler reaps idle sessions, so on a service that sits quiet between
+            # demo sessions the next request checks out a dead socket and fails
+            # with `SSL SYSCALL error: Can't assign requested address` -- an
+            # intermittent 500 that recovers on retry and reads as a flake.
+            # `check` verifies the connection on checkout so a dead one is
+            # discarded and replaced instead of being handed to a request.
+            check=_check_connection,
+            # Bounding the checkout wait matters as much as the TCP timeout: if
+            # every pooled connection is busy, getconn() must fail fast rather
+            # than pile up request threads waiting for a free slot.
+            timeout=connect_timeout,
+        )
+        _pool.open()
+    return _pool
+
+
+def _positive_int(name: str, default: int) -> int:
+    """Read a positive integer from the environment, or fail with the name.
+
+    A raw ``int()`` here raises ``ValueError: invalid literal for int()`` from
+    inside a request handler, which tells whoever is on call nothing about which
+    variable is wrong. A misconfigured pool size should be a startup-shaped
+    error, not a mystery 500.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        raise RuntimeError(
+            f"{name} must be a whole number, got {raw!r}. "
+            f"Remove it to use the default of {default}."
+        ) from None
+    if value < 1:
+        raise RuntimeError(
+            f"{name} must be at least 1, got {value}. "
+            f"Remove it to use the default of {default}."
+        )
+    return value
+
+
+class _PooledConnection:
+    """Adapter whose ``close()`` returns the connection to the pool.
+
+    ``psycopg-pool``'s ``getconn()`` hands back a plain ``psycopg.Connection``
+    that has no idea a pool exists. Calling ``.close()`` on it therefore closes
+    the real socket *without* telling the pool, and the pool keeps counting that
+    slot as checked out forever. The connection is gone, but the slot is not,
+    so it is never reused.
+
+    That is a silent, total outage rather than a slow leak: the pool fills to
+    ``max_size`` after a few dozen requests and every later request blocks for
+    30s and then raises ``PoolTimeout``. Every router here calls
+    ``conn.close()`` in a ``finally``, so the entire API stops working.
+
+    Verified on both psycopg-pool 3.2.3 and 3.3.3 — both return a plain
+    ``Connection`` from ``getconn()``, so neither is safe to call ``.close()``
+    on directly. ``putconn()`` is the documented way to hand a connection back
+    and exists in both, so use it unconditionally.
+    """
+
+    __slots__ = ("_pool", "_conn", "_used")
+
+    def __init__(self, pool: ConnectionPool, conn) -> None:
+        self._pool = pool
+        self._conn = conn
+        # Has any statement been sent on this connection yet? A connection that
+        # dies before its first statement provably executed nothing, which is
+        # what makes the retry in execute() safe.
+        self._used = False
+
+    def __getattr__(self, name):
+        # execute / commit / rollback / fetchall / row_factory all pass through.
+        return getattr(self._conn, name)
+
+    def execute(self, query, *args, **kwargs):
+        """Run a statement, replacing the connection once if it is already dead.
+
+        Supabase's pooler reaps idle sessions, so a slot can be handed back
+        holding a socket the server has since closed. psycopg reports that as
+        `OperationalError: the connection is closed`, and without this the
+        caller sees a 500 on the first request after an idle spell -- a
+        failure that then clears on its own, which is what makes it read as a
+        mysterious flake rather than a bug.
+
+        The retry is deliberately narrow, because a blanket "retry on
+        OperationalError" is unsafe: for a write, the connection can drop
+        *after* the server has already applied the statement, and replaying it
+        would double-apply. Here the retry only fires when this adapter has
+        not yet sent a single statement, so nothing can have been applied and a
+        fresh connection running it for the first time is guaranteed correct.
+
+        A second failure propagates: if a brand-new connection cannot execute
+        the query, the database is genuinely unavailable and the caller should
+        see that as a 500.
+        """
+        try:
+            result = self._conn.execute(query, *args, **kwargs)
+        except OperationalError:
+            if self._used:
+                # A statement already went out on this connection, so its fate
+                # is unknown. Replaying it could duplicate a write.
+                raise
+            try:
+                # putconn(), not close(): close() on the raw connection would
+                # drop the socket while the pool still counts the slot as
+                # checked out, leaking it until the pool starves (see
+                # _PooledConnection's docstring). Returning it lets the pool's
+                # own `check` callback see the dead connection and discard it.
+                self._pool.putconn(self._conn)
+            except Exception:
+                pass
+            self._conn = self._pool.getconn()
+            result = self._conn.execute(query, *args, **kwargs)
+        self._used = True
+        return result
+
+    def close(self) -> None:
+        # Roll back first. autocommit is off, so any statement leaves the
+        # connection INTRANS, and psycopg-pool logs a WARNING for every
+        # connection returned that way ("rolling back returned connection"),
+        # which floods the logs on a busy API. Cleaning up here means the pool
+        # always sees an IDLE connection. Read handlers never commit, so this
+        # only ever discards a read-only transaction.
+        try:
+            if self._conn.info.transaction_status != TransactionStatus.IDLE:
+                self._conn.rollback()
+        except Exception:
+            pass
+        try:
+            self._pool.putconn(self._conn)
+        except Exception:
+            # Never let cleanup mask the caller's own exception.
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+
+
+def get_db_connection():
+    """Return a pooled connection for the usual execute/commit/close pattern.
+
+    ``.close()`` returns the connection to the pool rather than tearing it down,
+    which is why every router's try/finally + close() keeps working unchanged.
+    See ``_PooledConnection`` for why that distinction needs an adapter.
+
+    psycopg runs with autocommit off, so a bare SELECT opens a transaction that
+    close() rolls back — harmless for reads — and an explicit conn.commit()
+    still gives routers the atomic block they expect.
+
+    This must be `getconn()`, not `connection()`. `connection()` is a
+    @contextmanager generator: calling it hands back a
+    _GeneratorContextManager, which has no execute/commit/close, so every
+    caller raised AttributeError before reaching the database. `getconn()`
+    checks a connection out of the pool.
+    """
+    pool = get_pool()
+    return _PooledConnection(pool, pool.getconn())
+
+
+def close_pool() -> None:
+    """Close the pool. Used by tests; harmless to call when never opened."""
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
+
+
+def _has_auth_schema(conn) -> bool:
+    row = conn.execute(
+        "SELECT 1 AS ok FROM information_schema.schemata WHERE schema_name = 'auth'"
+    ).fetchone()
+    return bool(row)
+
+
+# ---------------------------------------------------------------- migrations
+def _applied_migrations(conn) -> set[str]:
+    # seed_meta is created by 001, but it does not exist yet on a virgin
+    # database, so make sure it does before asking what has been applied.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS seed_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
+    row = conn.execute("SELECT value FROM seed_meta WHERE key = 'migrations'").fetchone()
+    return {part for part in (row or {}).get("value", "").split(",") if part}
+
+
+def _record_migration(conn, name: str, applied: set[str]) -> None:
+    applied.add(name)
+    conn.execute(
+        "INSERT INTO seed_meta (key, value) VALUES ('migrations', %s) "
+        "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (",".join(sorted(applied)),),
+    )
+
+
+def _run_migration_file(conn, path: Path) -> None:
+    """Execute one .sql file inside the caller's transaction.
+
+    The migration files carry their own BEGIN/COMMIT so they can also be
+    pasted straight into the Supabase SQL editor. psycopg already wraps this
+    call in a transaction and nesting one is an error, so those two outer
+    markers are stripped before execution.
+    """
+    sql = path.read_text(encoding="utf-8")
+    for marker in ("BEGIN;", "COMMIT;"):
+        sql = sql.replace(marker, "")
+    conn.execute(sql)
+
+
+def apply_migrations() -> list[str]:
+    """Apply migration files not yet recorded in seed_meta.
+
+    Idempotent — already-applied files are skipped, so this is one cheap query
+    on a warm start. Returns the names applied during this call.
+    """
+    if not MIGRATIONS_DIR.is_dir():
+        raise DatabaseNotConfigured(
+            f"migrations directory not found at {MIGRATIONS_DIR}. Run the backend from "
+            "the repo checkout, or apply supabase/migrations/*.sql via the Supabase SQL "
+            "editor and insert the filenames into seed_meta under key 'migrations'."
+        )
+
+    conn = get_db_connection()
+    applied: set[str] = set()
+    newly: list[str] = []
+    try:
+        applied = _applied_migrations(conn)
+        for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+            if path.name in applied:
+                continue
+            # 002_rls.sql needs Supabase's `auth` schema. On a plain PostgreSQL
+            # instance (CI, local dev) skip it instead of failing the boot —
+            # those policies are documented as correct-but-inactive for the
+            # backend anyway, since it connects as the table owner.
+            if path.name.endswith("_rls.sql") and not _has_auth_schema(conn):
+                print(f"[db] skipping {path.name}: no `auth` schema (not a Supabase project)")
+                continue
+            _run_migration_file(conn, path)
+            _record_migration(conn, path.name, applied)
+            newly.append(path.name)
+            print(f"[db] applied {path.name}")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return newly
 
 
 def init_db() -> None:
-    conn = get_db_connection()
-    cur = conn.cursor()
+    """Startup hook called from the FastAPI lifespan.
 
-    cur.executescript("""
-    CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        employee_id TEXT,
-        designation TEXT,
-        department TEXT,
-        role TEXT NOT NULL DEFAULT 'learner',
-        current_role TEXT,
-        education TEXT,
-        experience INTEGER DEFAULT 0,
-        career_goal TEXT,
-        previous_training TEXT,
-        preferred_language TEXT DEFAULT 'English',
-        profile_completed INTEGER DEFAULT 0
-    );
+    Applies any pending migrations (which includes the one-time seed). The old
+    SQLite version re-inserted reference data on every boot, which is why it
+    needed such careful "INSERT OR IGNORE" discipline; recording applied
+    migrations removes the whole class of problem.
+    """
+    apply_migrations()
 
-    CREATE TABLE IF NOT EXISTS competencies (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        category TEXT NOT NULL,
-        description TEXT
-    );
 
-    CREATE TABLE IF NOT EXISTS competency_scores (
-        user_id TEXT NOT NULL,
-        competency_id TEXT NOT NULL,
-        level INTEGER NOT NULL,
-        PRIMARY KEY (user_id, competency_id),
-        FOREIGN KEY (user_id) REFERENCES users(id),
-        FOREIGN KEY (competency_id) REFERENCES competencies(id)
-    );
+def healthcheck() -> dict:
+    """Probe the database for the /api/health endpoint.
 
-    CREATE TABLE IF NOT EXISTS role_requirements (
-        role TEXT NOT NULL,
-        competency_id TEXT NOT NULL,
-        level INTEGER NOT NULL,
-        PRIMARY KEY (role, competency_id)
-    );
+    Reports what it actually knows rather than asserting a cause. A paused
+    free Supabase project refuses connections, and the driver's message for
+    that is indistinguishable from a bad host or a dropped network — so
+    `hint` offers the most likely fix without claiming it is the cause.
 
-    CREATE TABLE IF NOT EXISTS courses (
-        id TEXT PRIMARY KEY,
-        course_code TEXT,
-        title TEXT NOT NULL,
-        provider TEXT NOT NULL,
-        description TEXT,
-        skills_covered TEXT NOT NULL,
-        difficulty TEXT,
-        duration TEXT,
-        language TEXT,
-        rating REAL DEFAULT 0,
-        thumbnail TEXT,
-        category TEXT,
-        modules TEXT NOT NULL DEFAULT '[]'
-    );
-
-    CREATE TABLE IF NOT EXISTS course_enrollments (
-        user_id TEXT NOT NULL,
-        course_id TEXT NOT NULL,
-        progress INTEGER DEFAULT 0,
-        enrolled_at TEXT DEFAULT CURRENT_DATE,
-        PRIMARY KEY (user_id, course_id),
-        FOREIGN KEY (user_id) REFERENCES users(id),
-        FOREIGN KEY (course_id) REFERENCES courses(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS module_progress (
-        user_id TEXT NOT NULL,
-        course_id TEXT NOT NULL,
-        module_title TEXT,
-        completed_at TEXT DEFAULT CURRENT_DATE,
-        PRIMARY KEY (user_id, course_id, module_title)
-    );
-
-    CREATE TABLE IF NOT EXISTS quizzes (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        title TEXT,
-        date TEXT DEFAULT CURRENT_DATE,
-        score INTEGER DEFAULT 0,
-        total_questions INTEGER DEFAULT 0,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS quiz_questions (
-        id TEXT PRIMARY KEY,
-        quiz_id TEXT NOT NULL,
-        question TEXT,
-        options TEXT NOT NULL,
-        correct_answer INTEGER NOT NULL,
-        user_answer INTEGER,
-        explanation TEXT,
-        difficulty TEXT,
-        source_excerpt TEXT,
-        FOREIGN KEY (quiz_id) REFERENCES quizzes(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS notifications (
-        id TEXT PRIMARY KEY,
-        user_id TEXT,
-        message TEXT,
-        type TEXT DEFAULT 'info',
-        date TEXT,
-        is_read INTEGER DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS activities (
-        id TEXT PRIMARY KEY,
-        user_id TEXT,
-        action TEXT,
-        detail TEXT,
-        date TEXT,
-        icon TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS labs (
-        id TEXT PRIMARY KEY,
-        title TEXT,
-        category TEXT,
-        description TEXT,
-        icon TEXT,
-        exercises TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS org_learners (
-        name TEXT PRIMARY KEY, department TEXT, job_role TEXT,
-        competency REAL, gaps INTEGER, completed INTEGER, status TEXT
-    );
-    """)
-
-    # --- migrations for older DB files ------------------------------------
-    course_cols = _columns(conn, "courses")
-    if "course_code" not in course_cols:
-        cur.execute("ALTER TABLE courses ADD COLUMN course_code TEXT")
-    if "modules" not in course_cols:
-        cur.execute("ALTER TABLE courses ADD COLUMN modules TEXT NOT NULL DEFAULT '[]'")
-
-    # --- clear dependent tables in FK-safe order so re-seeding is idempotent
-    #     (init_db runs on every startup, including --reload reloads)
-    cur.execute("DELETE FROM module_progress")
-    cur.execute("DELETE FROM course_enrollments")
-    cur.execute("DELETE FROM quiz_questions")
-    cur.execute("DELETE FROM quizzes")
-    cur.execute("DELETE FROM competency_scores")
-    cur.execute("DELETE FROM role_requirements")
-    cur.execute("DELETE FROM competencies")
-    cur.execute("DELETE FROM courses")
-    cur.execute("DELETE FROM labs")
-
-    # --- seed competencies -------------------------------------------------
-    cur.executemany(
-        "INSERT INTO competencies (id, name, category, description) VALUES (?, ?, ?, ?)",
-        COMPETENCIES,
-    )
-
-    # --- seed role requirements -------------------------------------------
-    cur.executemany(
-        "INSERT INTO role_requirements (role, competency_id, level) VALUES (?, ?, ?)",
-        ROLE_REQUIREMENTS,
-    )
-
-    # --- seed courses ------------------------------------------------------
-    cur.executemany(
-        "INSERT INTO courses (id, course_code, title, provider, description, skills_covered, difficulty, duration, language, rating, thumbnail, category, modules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        COURSES,
-    )
-
-    # --- seed labs ---------------------------------------------------------
-    cur.executemany(
-        "INSERT INTO labs (id, title, category, description, icon, exercises) VALUES (?, ?, ?, ?, ?, ?)",
-        LABS,
-    )
-
-    # --- seed users ---------------------------------------------------------
-    if not cur.execute("SELECT id FROM users WHERE id = 'learner-1'").fetchone():
-        cur.execute(
-            "INSERT INTO users (id, name, employee_id, designation, department, role, current_role, education, experience, career_goal, previous_training, preferred_language, profile_completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("learner-1", "Ananya Sharma", "GOV-2021-0847", "Statistical Investigator",
-             "National Sample Survey Office", "learner", "Data Analyst", "M.Sc. Statistics, University of Delhi",
-             3, "Senior Statistical Officer", "Basic Data Entry, Census Operations Training", "English", 1),
+    Security: this endpoint is unauthenticated, and the driver exception
+    string embeds the connection host, port and username. psycopg masks the
+    password, but `aws-0-<region>.pooler.supabase.com` and `postgres.<ref>`
+    are still infrastructure detail worth not publishing. So `detail` stays
+    generic and only the exception *class name* is exposed in `error_type`.
+    The full text goes to the server log instead.
+    """
+    result: dict = {
+        "status": "error",
+        "service": "sakshamai-backend",
+        "database": "unreachable",
+        "detail": "",
+        "hint": "",
+        "error_type": "",
+    }
+    try:
+        conn = get_db_connection()
+    except DatabaseNotConfigured as exc:
+        result["detail"] = str(exc)
+        result["hint"] = "Copy .env.example to backend/.env and set DATABASE_URL."
+        return result
+    except Exception as exc:  # pool could not even open
+        logger.warning("%s", safe_exception(exc, context="database pool unavailable"))
+        result["detail"] = "connection pool unavailable"
+        result["error_type"] = type(exc).__name__
+        result["hint"] = (
+            "If this project has never been used recently it may be paused: open "
+            "the Supabase dashboard and choose Restore project, then retry. "
+            "Free projects pause after a period of inactivity; Pro does not."
         )
-    cur.execute("DELETE FROM competency_scores WHERE user_id = 'learner-1'")
-    for cid, lvl in LEARNER_COMPETENCIES.items():
-        cur.execute(
-            "INSERT INTO competency_scores (user_id, competency_id, level) VALUES (?, ?, ?)",
-            ("learner-1", cid, lvl),
-        )
+        return result
 
-    if not cur.execute("SELECT id FROM users WHERE id = 'admin-1'").fetchone():
-        cur.execute(
-            "INSERT INTO users (id, name, employee_id, designation, department, role, current_role, education, experience, career_goal, previous_training, preferred_language, profile_completed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            ("admin-1", "Dr. Rajesh Kumar", "GOV-2015-0123", "Director",
-             "National Sample Survey Office", "admin", "Administrator", "Ph.D. Statistics, IIT Kanpur",
-             15, "Additional Secretary", "Leadership Development Program", "English", 1),
+    try:
+        conn.execute("SELECT 1 AS ok").fetchone()
+        result["database"] = "ok"
+        result["status"] = "ok"
+        row = conn.execute("SELECT value FROM seed_meta WHERE key = 'version'").fetchone()
+        result["seedVersion"] = (row or {}).get("value")
+        result["hint"] = (
+            "Migrations are not applied yet." if not row else ""
         )
-    cur.execute("DELETE FROM competency_scores WHERE user_id = 'admin-1'")
-    for cid, lvl in ADMIN_COMPETENCIES.items():
-        cur.execute(
-            "INSERT INTO competency_scores (user_id, competency_id, level) VALUES (?, ?, ?)",
-            ("admin-1", cid, lvl),
+    except Exception as exc:
+        # Same reasoning as above: the driver text can name the host, port and
+        # user, and this route is public. Class name only, full text to the log.
+        logger.warning("%s", safe_exception(exc, context="database health query failed"))
+        result["detail"] = "database query failed"
+        result["error_type"] = type(exc).__name__
+        result["hint"] = (
+            "If this project has never been used recently it may be paused: open "
+            "the Supabase dashboard and choose Restore project, then retry."
         )
-
-    # --- notifications & activities -----------------------------------------
-    if not cur.execute("SELECT id FROM notifications WHERE user_id = 'learner-1'").fetchone():
-        notifications = [
-            ("n1", "learner-1", "Your Data Visualization competency improved from Level 2 to Level 3 after completing the recommended course and assessment.", "success", "2025-09-01", 0),
-            ("n2", "learner-1", "New course available: Advanced Machine Learning for Statistics", "info", "2025-08-28", 0),
-            ("n3", "learner-1", "You have multiple high-priority skill gaps to address for your target role.", "warning", "2025-08-25", 1),
-            ("n4", "learner-1", "Monthly learning streak: 7 days! Keep it up.", "success", "2025-08-20", 1),
-        ]
-        cur.executemany(
-            "INSERT INTO notifications (id, user_id, message, type, date, is_read) VALUES (?, ?, ?, ?, ?, ?)",
-            notifications,
-        )
-
-    if not cur.execute("SELECT id FROM activities WHERE user_id = 'learner-1'").fetchone():
-        activities = [
-            ("a1", "learner-1", "Completed Quiz", "Python for Government Data Analysis - Score: 80%", "2025-09-01", "📝"),
-            ("a2", "learner-1", "Enrolled in Course", "Data Visualization with Power BI", "2025-08-28", "📚"),
-            ("a3", "learner-1", "Skill Improved", "Data Visualization: Level 2 → Level 3", "2025-08-25", "🎯"),
-            ("a4", "learner-1", "Completed Course", "Introduction to Artificial Intelligence", "2025-08-20", "✅"),
-            ("a5", "learner-1", "Profile Updated", "Added career goal: Senior Statistical Officer", "2025-08-15", "👤"),
-        ]
-        cur.executemany(
-            "INSERT INTO activities (id, user_id, action, detail, date, icon) VALUES (?, ?, ?, ?, ?, ?)",
-            activities,
-        )
-
-    # --- org learners -------------------------------------------------------
-    if not cur.execute("SELECT name FROM org_learners").fetchone():
-        cur.executemany(
-            "INSERT INTO org_learners VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ORG_LEARNERS,
-        )
-
-    conn.commit()
-    conn.close()
+    finally:
+        conn.close()
+    return result

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Header from '../components/layout/Header';
 import { Card, Badge, Button } from '../components/ui/UIComponents';
 import CodeRunner from '../components/CodeRunner';
@@ -6,6 +6,9 @@ import { useApp } from '../store/AppContext';
 import { BarChart3, Brain, MapPin, FlaskConical } from 'lucide-react';
 import { useStagger } from '../hooks/useStagger';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, LineChart, Line, Tooltip, Cell } from 'recharts';
+import { apiGetIndicators, apiGetSeries } from '../services/api';
+import { setDatasetTables, Row } from '../services/sqlEngine';
+import { StatIndicator } from '../types';
 
 // ---------------- linear regression (mock ML) ----------------
 function fitLine(xs: number[], ys: number[]) {
@@ -36,7 +39,7 @@ export default function VirtualLabsPage() {
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between stagger-fade-up" style={staggerStyle(0, animate)}>
           <p className="text-sm text-navy-500 max-w-2xl">
-            Hands-on sandboxes for Official Statistics — practice Python, write SQL on real district data,
+            Hands-on sandboxes for Official Statistics — practice Python, run SQL against real World Bank India statistics,
             build visualizations, fit regression models and explore GIS alongside your learning modules.
           </p>
           <Badge variant="info">Interactive</Badge>
@@ -85,24 +88,90 @@ function PythonLab() {
 }
 
 function SQLLab() {
+  // The lab is a client-side SQL sandbox (see services/sqlEngine.ts) — it does
+  // not execute SQL against the live database, which would mean letting a
+  // browser run arbitrary queries against a real Postgres. Instead the real
+  // World Bank rows are fetched and installed as the sandbox's tables, so
+  // learners practise SELECT/WHERE/ORDER BY/aggregates on genuine statistics.
+  const [indicators, setIndicators] = useState<StatIndicator[]>([]);
+  const [observations, setObservations] = useState<Row[]>([]);
+  const [loadError, setLoadError] = useState('');
+  const [attribution, setAttribution] = useState<StatIndicator | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const inds = await apiGetIndicators();
+        if (cancelled) return;
+
+        // Two series with a long shared span, so a JOIN or a grouped aggregate
+        // has something to work with. Health and Education give the clearest
+        // real-world contrast (rising life expectancy, falling fertility).
+        const picks = ['SP.DYN.LE00.IN', 'SP.DYN.TFRT.IN', 'SE.ADT.LITR.ZS']
+          .map(code => inds.find(i => i.code === code))
+          .filter((i): i is StatIndicator => Boolean(i));
+        if (picks.length === 0) throw new Error('No indicators returned by the API');
+
+        const series = await Promise.all(picks.map(i => apiGetSeries(i.code)));
+        if (cancelled) return;
+
+        const obs: Row[] = series.flatMap(s =>
+          s.points.map(p => ({
+            indicator_code: s.indicator.code,
+            year: p.year,
+            value: p.value ?? 0,
+          })),
+        );
+        const meta: Row[] = inds.map(i => ({
+          code: i.code,
+          name: i.name,
+          category: i.category,
+          unit: i.unit ?? '',
+        }));
+
+        setDatasetTables({ indicators: meta, observations: obs });
+        setIndicators(inds);
+        setObservations(obs);
+        setAttribution(picks[0]);
+      } catch (e) {
+        if (!cancelled) setLoadError((e as Error).message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const sqlPresets = [
-    { title: 'High literacy', code: 'SELECT name, literacy FROM districts WHERE literacy > 75 ORDER BY literacy DESC' },
-    { title: 'By population', code: 'SELECT name, population FROM districts ORDER BY population DESC' },
-    { title: 'Count samples', code: 'SELECT COUNT(*) FROM samples' },
-    { title: 'Avg literacy', code: 'SELECT AVG(literacy) FROM districts' },
-    { title: 'Kerala rows', code: "SELECT name, state FROM districts WHERE state = 'Kerala'" },
-    { title: 'All samples', code: 'SELECT * FROM samples' },
+    { title: 'All indicators', code: 'SELECT code, name, category FROM indicators ORDER BY category' },
+    { title: 'Life expectancy over time', code: "SELECT year, value FROM observations WHERE indicator_code = 'SP.DYN.LE00.IN' ORDER BY year" },
+    { title: 'Since 2000', code: "SELECT year, value FROM observations WHERE indicator_code = 'SP.DYN.LE00.IN' AND year > 2000 ORDER BY year DESC" },
+    { title: 'Count observations', code: 'SELECT COUNT(*) FROM observations' },
+    { title: 'Average life expectancy', code: "SELECT AVG(value) FROM observations WHERE indicator_code = 'SP.DYN.LE00.IN'" },
+    { title: 'Health indicators', code: "SELECT code, name FROM indicators WHERE category = 'Health'" },
   ];
 
   return (
     <Card>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-navy-800">🗃️ SQL on Official Census Data</h3>
-          <p className="text-xs text-navy-400 mt-1">SELECT / WHERE / ORDER BY / aggregates on district census + survey data. Invalid queries report an error.</p>
+          <h3 className="text-sm font-semibold text-navy-800">🗃️ SQL on World Bank India Data</h3>
+          <p className="text-xs text-navy-400 mt-1">SELECT / WHERE / ORDER BY / aggregates on {observations.length || '…'} real observations across {indicators.length || '…'} indicators. Invalid queries report an error.</p>
         </div>
         <Badge variant="success">Real query engine</Badge>
       </div>
+      {loadError && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+          Could not load the live dataset ({loadError}). The sandbox is running on its
+          built-in sample rows, which are placeholders — sign in and check the API
+          before quoting any number from here.
+        </p>
+      )}
+      {!loadError && attribution && (
+        <p className="mb-3 rounded-lg border border-navy-100 bg-navy-50 px-3 py-2 text-[11px] text-navy-500">
+          Source: {attribution.source} · {attribution.license} · {attribution.source_url}
+          {' · '}{attribution.provenance}
+        </p>
+      )}
       <CodeRunner initialCode={sqlPresets[0].code} presets={sqlPresets} engine="sql" />
     </Card>
   );

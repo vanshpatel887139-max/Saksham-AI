@@ -1,11 +1,11 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
-import { UserProfile, SkillGap, Course, Quiz, Notification, Activity, CompetencyScore, QuizQuestion, Lab, ChatMessage, ForecastData, ModuleCompleteResult } from '../types';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { UserProfile, SkillGap, Course, Quiz, Notification, Activity, CompetencyScore, QuizQuestion, Lab, ChatMessage, ForecastData, ModuleCompleteResult, AssessmentQuestionRecord, DashboardSummary } from '../types';
 import { mockNotifications, mockActivities, mockLabs } from '../services/appService';
 import { courses as allCoursesData } from '../data/mockData';
 import {
   apiLogin, apiUpdateProfile, apiUpdateCompetencies, apiAnalyzeGaps, apiEnrollCourse,
   apiSubmitQuiz, apiGetLabs, apiChatAssistant, apiCompleteModule, apiAdminForecast,
-  apiGetCourses, isBackendAvailable,
+  apiGetCourses, apiGetUser, apiChatHistory, isBackendAvailable, apiLogout, UNAUTHORIZED_EVENT, apiDashboard,
 } from '../services/api';
 import { determineEnrollment } from '../services/appService';
 
@@ -20,6 +20,21 @@ interface AppState {
   quizzes: Quiz[];
   notifications: Notification[];
   activities: Activity[];
+  /**
+   * Server-measured dashboard figures, or null when the summary has not been
+   * fetched (or the backend is unreachable). Read this instead of inventing
+   * values in a component — that is how "Learning Hours 24" happened.
+   */
+  dashboard: DashboardSummary | null;
+  /**
+   * True only while the post-sign-in fetches are still in flight. The
+   * dashboard uses it to tell "not loaded yet" from "genuinely empty", so it
+   * can show a skeleton instead of an empty-state message that would turn out
+   * to be wrong a second later.
+   */
+  dataLoading: boolean;
+  /** Re-read the summary; call after anything that changes the numbers. */
+  refreshDashboard: () => Promise<void>;
   selectedRole: string;
   sidebarOpen: boolean;
   backendOnline: boolean;
@@ -30,10 +45,16 @@ interface AppState {
 }
 
 interface AppContextType extends AppState {
-  login: (role: 'learner' | 'admin') => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   updateUserProfile: (updates: Partial<UserProfile>) => Promise<void>;
   updateCompetencies: (scores: CompetencyScore[]) => Promise<void>;
+  /**
+   * Seeds the latest-test paper into local profile state without a server call.
+   * Used only on the offline grading path, where `apiUpdateCompetencies` throws
+   * and the enriched response that normally carries the breakdown is absent.
+   */
+  setLocalAssessmentRecords: (records: AssessmentQuestionRecord[], testId: string, takenAt: string) => void;
   setSelectedRole: (role: string) => void;
   calculateGaps: (role?: string) => Promise<void>;
   enrollInCourse: (courseId: string) => Promise<void>;
@@ -56,8 +77,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedRole, setSelectedRole] = useState('Data Analyst');
   const [enrolledCourses, setEnrolledCourses] = useState<Course[]>([]);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [notifications] = useState<Notification[]>(mockNotifications);
-  const [activities] = useState<Activity[]>(mockActivities);
+  // Start empty rather than seeded with the mocks, so an offline sign-in shows
+  // an honest empty feed instead of records that look like the user's own.
+  // `appService` seeds them again if the summary call fails.
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  // null means "not loaded yet", which is distinct from a loaded summary whose
+  // numbers happen to be zero. The dashboard uses it to avoid rendering a
+  // spurious 0 hours for the moment before the request lands.
+  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
+  // False whenever data has settled; true only during the burst of fetches a
+  // fresh sign-in starts. See the property's doc comment for why the
+  // dashboard needs this distinct from `dashboard === null`.
+  const [dataLoading, setDataLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [backendOnline, setBackendOnline] = useState(isBackendAvailable());
   const [labs, setLabs] = useState<Lab[]>(mockLabs);
@@ -65,32 +97,129 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [forecast, setForecast] = useState<ForecastData | null>(null);
   const [language, setLanguage] = useState<Language>('en');
 
-  const login = useCallback(async (role: 'learner' | 'admin') => {
-    const result = await apiLogin(role);
+  /**
+   * Pull the dashboard's numbers, feed and notifications in one request.
+   *
+   * Callers that mutate the underlying tables (submitting a quiz, completing a
+   * module) call this again afterwards, so a value shown on the dashboard
+   * always reflects the last thing the user did rather than the state at
+   * sign-in. Failures are swallowed to null deliberately: the rest of the app
+   * must keep working when this one endpoint is unavailable.
+   */
+  const refreshDashboard = useCallback(async () => {
+    try {
+      const summary = await apiDashboard();
+      setDashboard(summary);
+      if (summary) {
+        setActivities(summary.activities);
+        setNotifications(summary.notifications);
+        setBackendOnline(true);
+      } else {
+        // Offline: fall back to the bundled sample feed so the page is not
+        // blank, but keep `dashboard` null so no card shows invented numbers.
+        setActivities(mockActivities);
+        setNotifications(mockNotifications);
+      }
+    } catch { /* 401 propagates to the session-expiry listener */ }
+  }, []);
+
+  const login = useCallback(async (email: string, password: string) => {
+    // Throws on bad credentials — deliberately no catch, so a failed sign-in
+    // leaves the user on the login screen instead of quietly continuing as a
+    // mock learner.
+    const result = await apiLogin(email, password);
     setUser(result.user);
     setIsAuthenticated(true);
     setBackendOnline(isBackendAvailable());
+    setDataLoading(true);
+
     try {
-      const labsData = await apiGetLabs();
-      setLabs(labsData);
-    } catch { /* offline: keep mock labs */ }
-    if (role === 'learner') {
-      const analysis = await apiAnalyzeGaps(result.user.currentRole || 'Data Analyst', result.user.competencies);
-      setSkillGaps(analysis.gaps);
-      const enrolled = await apiGetCourses(result.user.id).catch(() => analysis.recommendedCourses.slice(0, 2));
-      if (enrolled && enrolled.length > 0) {
-        setEnrolledCourses(enrolled.filter(c => c.enrolled).length > 0
-          ? enrolled.filter(c => c.enrolled)
-          : analysis.recommendedCourses.slice(0, 2).map(c => ({ ...c, enrolled: true, progress: 10 })));
-      } else {
-        setEnrolledCourses(analysis.recommendedCourses.slice(0, 2).map(c => ({
-          ...c, enrolled: true, progress: Math.floor(Math.random() * 60) + 10,
-        })));
-      }
+      // The post-sign-in fetches are independent, so run them concurrently.
+      // Serialised, the labs, transcript, dashboard summary and enrolment rows
+      // were awaited one after another and the dashboard stayed empty — or
+      // worse, showed its "no data yet" messages — for the whole chain's
+      // latency. In parallel they resolve in roughly one round-trip.
+      await Promise.all([
+        // Restore the persisted advisor transcript so a refresh mid-conversation
+        // does not silently drop the mentor's advice.
+        apiChatHistory()
+          .then(history => {
+            if (history.length) {
+              setChatMessages(history.map((m, i) => ({
+                id: `hist-${i}`,
+                role: m.role,
+                content: m.content,
+                timestamp: m.at || new Date().toISOString(),
+              })));
+            }
+          })
+          .catch(() => { /* offline: start with an empty transcript */ }),
+        apiGetLabs()
+          .then(setLabs)
+          .catch(() => { /* offline: keep mock labs */ }),
+        // One request for hours, streak, feed, notifications, quiz stats and the
+        // pathway. Previously the page rendered literals for all of these.
+        refreshDashboard(),
+        result.user.role === 'learner'
+          ? (async () => {
+              const [analysis, coursesRaw] = await Promise.all([
+                apiAnalyzeGaps(result.user.currentRole || 'Data Analyst', result.user.competencies),
+                apiGetCourses(result.user.id).catch(() => null),
+              ]);
+              setSkillGaps(analysis.gaps);
+              const enrolled = coursesRaw && coursesRaw.length > 0
+                ? coursesRaw
+                : analysis.recommendedCourses.slice(0, 2);
+              if (enrolled && enrolled.length > 0) {
+                setEnrolledCourses(enrolled.filter(c => c.enrolled).length > 0
+                  ? enrolled.filter(c => c.enrolled)
+                  : analysis.recommendedCourses.slice(0, 2).map(c => ({ ...c, enrolled: true, progress: 10 })));
+              } else {
+                setEnrolledCourses(analysis.recommendedCourses.slice(0, 2).map(c => ({
+                  ...c, enrolled: true, progress: Math.floor(Math.random() * 60) + 10,
+                })));
+              }
+            })().catch(() => { /* per-profile data is best-effort */ })
+          : Promise.resolve(),
+      ]);
+    } finally {
+      // Even if one fetch fails the page keeps working; this flag is what the
+      // dashboard uses to tell "still loading" from "genuinely empty".
+      setDataLoading(false);
     }
+  }, [refreshDashboard]);
+
+  // An expired or revoked session produces a 401 on the next request, which
+  // the api client reports here. Clearing the user is what makes the route
+  // guards in App.tsx bounce back to the login screen; without it the user
+  // would sit on a dashboard where every call fails.
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setUser(null);
+      setIsAuthenticated(false);
+      setSkillGaps([]);
+      setEnrolledCourses([]);
+      setQuizzes([]);
+      setChatMessages([]);
+      setForecast(null);
+      // Clear the feed too. Leaving the previous learner's activities and
+      // notifications in state is the one leak this app cannot afford: they
+      // are personal data, and a stale array would render on the next login
+      // for up to the moment the new summary lands.
+      setActivities([]);
+      setNotifications([]);
+      setDashboard(null);
+      setDataLoading(false);
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, []);
 
   const logout = useCallback(() => {
+    // Clear the server-side session too. Fire-and-forget: local state is
+    // dropped immediately so the UI is never waiting on the network to sign
+    // someone out, and apiLogout() swallows its own errors.
+    void apiLogout();
     setUser(null);
     setIsAuthenticated(false);
     setSkillGaps([]);
@@ -98,6 +227,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setQuizzes([]);
     setChatMessages([]);
     setForecast(null);
+    setActivities([]);
+    setNotifications([]);
+    setDashboard(null);
+    setDataLoading(false);
   }, []);
 
   const updateUserProfile = useCallback(async (updates: Partial<UserProfile>) => {
@@ -113,14 +246,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let targetRole = selectedRole;
     if (user) {
       try {
-        await apiUpdateCompetencies(user.id, scores);
+        // The response is the full enriched profile. Merge it in so that
+        // testMeta / assessmentQuestions (only ever populated by this endpoint)
+        // reach client state — otherwise the results page has no data to show.
+        const fresh = await apiUpdateCompetencies(user.id, scores);
+        setUser(prev => prev ? {
+          ...prev,
+          ...fresh,
+          competencies: scores,
+        } : fresh);
         setBackendOnline(isBackendAvailable());
-      } catch { /* offline */ }
+      } catch { /* offline: local state kept */ }
       targetRole = user.currentRole || selectedRole;
       const analysis = await apiAnalyzeGaps(targetRole, scores);
       setSkillGaps(analysis.gaps);
     }
   }, [user, selectedRole]);
+
+  const setLocalAssessmentRecords = useCallback((
+    records: AssessmentQuestionRecord[],
+    testId: string,
+    takenAt: string,
+  ) => {
+    setUser(prev => prev ? {
+      ...prev,
+      testMeta: { ...prev.testMeta, testId, takenAt },
+      assessmentQuestions: records,
+    } : prev);
+  }, []);
 
   const calculateGaps = useCallback(async (role?: string) => {
     if (!user) return;
@@ -151,17 +304,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!user) return { ok: false, courseComplete: false, progress: 0, bumped: [] };
     const result = await apiCompleteModule(user.id, courseId, moduleTitle, assessmentScore);
     if (result.ok) {
-      // refresh profile + recompute gaps so auto-updated competencies reflect
-      const fresh = await apiLogin(user.role === 'admin' ? 'admin' : 'learner');
-      setUser(fresh.user);
+      // Refresh the profile so auto-updated competencies show up. This used to
+      // call apiLogin() with a role to get a fresh copy, which meant every
+      // module completion performed a second credential exchange just to read
+      // data it was already authorised for.
+      const fresh = await apiGetUser(user.id);
+      setUser(fresh);
       if (user.role === 'learner') {
-        const analysis = await apiAnalyzeGaps(fresh.user.currentRole || 'Data Analyst', fresh.user.competencies);
+        const analysis = await apiAnalyzeGaps(fresh.currentRole || 'Data Analyst', fresh.competencies);
         setSkillGaps(analysis.gaps);
       }
       setEnrolledCourses(prev => prev.map(c => c.id === courseId ? { ...c, progress: result.progress } : c));
+      // Module completion moves the hours, the pathway and the activity feed,
+      // so re-read rather than patching them locally: progress is a
+      // server-computed percentage and guessing it here would drift.
+      void refreshDashboard();
     }
     return result;
-  }, [user]);
+  }, [user, refreshDashboard]);
 
   const saveQuiz = useCallback(async (title: string, questions: QuizQuestion[], answers: (number | null)[]) => {
     let score = 0;
@@ -188,8 +348,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       answers,
     };
     setQuizzes(prev => [quiz, ...prev]);
+    // The attempt is now a row in `quizzes`, so the dashboard's quiz average
+    // and the activity feed are both out of date. Re-read them.
+    void refreshDashboard();
     return quiz;
-  }, [user]);
+  }, [user, refreshDashboard]);
 
   const sendAssistantMessage = useCallback(async (message: string) => {
     const userMsg: ChatMessage = { id: `m-${Date.now()}`, role: 'user', content: message, timestamp: new Date().toISOString() };
@@ -246,9 +409,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       user, isAuthenticated, skillGaps, recommendedCourses, enrolledCourses,
-      quizzes, notifications, activities, selectedRole, sidebarOpen, backendOnline,
+      quizzes, notifications, activities, dashboard, dataLoading, refreshDashboard, selectedRole, sidebarOpen, backendOnline,
       labs, chatMessages, forecast, language,
-      login, logout, updateUserProfile, updateCompetencies, setSelectedRole,
+      login, logout, updateUserProfile, updateCompetencies, setLocalAssessmentRecords, setSelectedRole,
       calculateGaps, enrollInCourse, saveQuiz, toggleSidebar, markNotificationRead, refreshData,
       sendAssistantMessage, completeModule, loadForecast, toggleLanguage,
     }}>

@@ -1,5 +1,5 @@
-import { UserProfile, SkillGap, Competency, RoleRequirement, Course, QuizQuestion, Notification, Activity, Lab } from '../types';
-import { competencies, roleRequirements, courses } from '../data/mockData';
+import { UserProfile, SkillGap, Competency, RoleRequirement, Course, QuizQuestion, Notification, Activity, Lab, CompetencyCategory, CompetencyTestResult, CompetencyTest, AssessmentQuestion, CompetencyScore, AssessmentQuestionRecord } from '../types';
+import { competencies, roleRequirements, courses, assessmentQuestionBank, generateStubCompetencyQuestions, shuffleQuestionOptions } from '../data/mockData';
 
 export const mockLabs: Lab[] = [
   {
@@ -17,7 +17,7 @@ export const mockLabs: Lab[] = [
     id: 'lab-sql',
     title: 'SQL Query Lab',
     category: 'Technical',
-    description: 'Query a real district-level census dataset with SELECT, WHERE, GROUP BY and JOIN.',
+    description: 'Write SQL against real World Bank India statistics - SELECT, WHERE, ORDER BY and aggregates, with errors reported instead of silent failure.',
     icon: '🗃️',
     exercises: [
       { table: 'districts', rows: [['id', 'name', 'state', 'population', 'literacy'], [1, 'Alwar', 'Rajasthan', 3674179, 70.7], [2, 'Mysuru', 'Karnataka', 3054822, 72.6], [3, 'Nashik', 'Maharashtra', 6109052, 80.9], [4, 'Ludhiana', 'Punjab', 3498739, 82.2], [5, 'Varanasi', 'Uttar Pradesh', 3676841, 70.3], [6, 'Thrissur', 'Kerala', 3121200, 95.1]] },
@@ -156,6 +156,57 @@ export const adminUser: UserProfile = {
   role: 'admin',
 };
 
+/**
+ * The two fixed demo logins, usable only when no backend is reachable.
+ *
+ * ############################################################################
+ * # THIS PASSWORD IS PUBLIC IN A DEV BUILD. IT IS COMPILED INTO THE         #
+ * # SHIPPED JS BUNDLE.                                                      #
+ * #                                                                          #
+ * # `Demo@1234` below is a literal in client source, so anyone can read it   #
+ * # with curl, view-source, or the network tab. Moving it to a              #
+ * # `VITE_*` variable would NOT help: Vite inlines those into the same       #
+ * # bundle. This is a deliberate demo affordance, NOT a secret and NOT        #
+ * # authentication — it exists only so the UI can be explored before a       #
+ * # backend is wired up.                                                     #
+ * #                                                                          #
+ * # A production build must not contain it, so the table is behind            #
+ * # `import.meta.env.DEV` and is empty when `npm run build` runs. That is    #
+ * # now automatic — verified by scripts/check_deploy.py, which greps the     #
+ * # built bundle for this string and fails the deploy if it finds it.        #
+ * #                                                                          #
+ * # The gitleaks allowlist entry that keeps this from failing a commit is   #
+ * # scoped to this file and is still required, because the *source* still   #
+ * # contains the literal.                                                    #
+ * ############################################################################
+ *
+ * The addresses match the rows seeded by supabase/migrations/003_seed.sql
+ * and the password matches DEMO_USER_PASSWORD in .env.example, so the same two
+ * logins work unchanged once a real backend is connected — at which point they
+ * are verified by Supabase Auth and this table stops being consulted.
+ *
+ * apiLogin only ever consults it when the backend is unreachable, so a running
+ * backend always takes precedence and cannot be bypassed this way.
+ *
+ * The passwords live in the JavaScript bundle, which means anyone who can
+ * download the bundle can read them. That is acceptable for a demo and not
+ * acceptable for a deployment, so the table is empty in a production build and
+ * the offline fallback can never authenticate anyone. Vite replaces
+ * `import.meta.env.DEV` with a literal at build time, so the strings below are
+ * dropped from the output entirely rather than merely unreachable — check the
+ * built bundle for "Demo@1234" to confirm.
+ */
+const DEMO_PASSWORDS: Record<string, { password: string; user: UserProfile }> =
+  import.meta.env.DEV
+    ? {
+        'learner-1@sakshamai.demo': { password: 'Demo@1234', user: defaultLearner },
+        'admin-1@sakshamai.demo': { password: 'Demo@1234', user: adminUser },
+      }
+    : {};
+
+export const DEMO_LOGINS: Record<string, { password: string; user: UserProfile }> = DEMO_PASSWORDS;
+
+
 export const mockNotifications: Notification[] = [
   { id: 'n1', message: 'Your Data Visualization competency improved from Level 2 to Level 3 after completing the recommended course and assessment.', type: 'success', date: '2025-09-01', read: false },
   { id: 'n2', message: 'New course available: Advanced Machine Learning for Statistics', type: 'info', date: '2025-08-28', read: false },
@@ -172,15 +223,15 @@ export const mockActivities: Activity[] = [
 ];
 
 export const mockOrgLearners = [
-  { name: 'Ananya Sharma', department: 'NSSO', role: 'Data Analyst', competency: 2.4, gaps: 4, completed: 3, status: 'Active' },
+  { name: 'Ananya Sharma', department: 'National Sample Survey Office', role: 'Data Analyst', competency: 2.4, gaps: 4, completed: 3, status: 'Active' },
   { name: 'Vikram Singh', department: 'Census Division', role: 'Statistical Investigator', competency: 3.1, gaps: 2, completed: 5, status: 'Active' },
-  { name: 'Priya Patel', department: 'NSSO', role: 'Data Analyst', competency: 2.8, gaps: 3, completed: 4, status: 'Active' },
+  { name: 'Priya Patel', department: 'National Sample Survey Office', role: 'Data Analyst', competency: 2.8, gaps: 3, completed: 4, status: 'Active' },
   { name: 'Amit Verma', department: 'DGCIS', role: 'Senior Statistical Officer', competency: 3.9, gaps: 1, completed: 7, status: 'Active' },
   { name: 'Sneha Reddy', department: 'Census Division', role: 'Statistical Investigator', competency: 2.2, gaps: 5, completed: 2, status: 'Inactive' },
-  { name: 'Rahul Gupta', department: 'NSSO', role: 'Data Analyst', competency: 3.5, gaps: 2, completed: 6, status: 'Active' },
+  { name: 'Rahul Gupta', department: 'National Sample Survey Office', role: 'Data Analyst', competency: 3.5, gaps: 2, completed: 6, status: 'Active' },
   { name: 'Deepa Nair', department: 'NSSTA', role: 'Senior Statistical Officer', competency: 4.1, gaps: 1, completed: 8, status: 'Active' },
   { name: 'Karthik Menon', department: 'DGCIS', role: 'Statistical Investigator', competency: 2.6, gaps: 3, completed: 3, status: 'Active' },
-  { name: 'Meera Joshi', department: 'NSSO', role: 'Data Analyst', competency: 3.0, gaps: 3, completed: 4, status: 'Active' },
+  { name: 'Meera Joshi', department: 'National Sample Survey Office', role: 'Data Analyst', competency: 3.0, gaps: 3, completed: 4, status: 'Active' },
   { name: 'Suresh Kumar', department: 'NSSTA', role: 'Senior Statistical Officer', competency: 3.7, gaps: 2, completed: 5, status: 'Active' },
 ];
 
@@ -337,4 +388,194 @@ export function getAllCompetencies(): Competency[] {
 
 export function getAllCourses(): Course[] {
   return courses;
+}
+export interface AssessmentQuestionSpec {
+  competencyId: string;
+  competencyName: string;
+  category: CompetencyCategory;
+  description: string;
+}
+
+export function deriveCompetencyTestLevels(
+  questions: AssessmentQuestion[],
+  answers: (number | null)[]
+): CompetencyTestResult[] {
+  const byCompetency = new Map<string, { q: AssessmentQuestion; index: number }[]>();
+  questions.forEach((q, index) => {
+    const list = byCompetency.get(q.competencyId) || [];
+    list.push({ q, index });
+    byCompetency.set(q.competencyId, list);
+  });
+  const results: CompetencyTestResult[] = [];
+  for (const [competencyId, entries] of byCompetency) {
+    let correct = 0;
+    let maxDifficultyCorrect = 0;
+    for (const { q, index } of entries) {
+      const answer = answers[index];
+      if (answer !== null && answer !== undefined && answer === q.correctIndex) {
+        correct += 1;
+        if (q.difficulty > maxDifficultyCorrect) maxDifficultyCorrect = q.difficulty;
+      }
+    }
+    const accuracyPct = Math.round((correct / entries.length) * 100);
+    let derived = accuracyPct >= 90 ? 5 : accuracyPct >= 75 ? 4 : accuracyPct >= 55 ? 3 : accuracyPct >= 35 ? 2 : 1;
+    derived = Math.min(derived, Math.max(1, maxDifficultyCorrect));
+    results.push({
+      competencyId,
+      competencyName: entries[0].q.competencyName,
+      derivedLevel: derived,
+      questionsAttempted: entries.length,
+      correctCount: correct,
+      accuracyPct,
+      highestDifficultyCorrect: maxDifficultyCorrect,
+    });
+  }
+  return results;
+}
+
+/**
+ * The role-based test deliberately covers only a focused subset of the 32 role
+ * competencies. A role has 32 requirements, so spreading a small question budget
+ * across all of them yields one question each — far too thin to derive a 1-5
+ * level from. Anything outside the subset is surfaced as "Not covered by test".
+ */
+export const TEST_SUBSET_SIZE = 6;
+export const QUESTIONS_PER_COMPETENCY = 3;
+
+/**
+ * Picks the competencies most worth testing: highest required level first, ties
+ * broken by the largest current gap. Returns at most `limit` entries.
+ */
+export function selectTestCompetencies(
+  targetRole: string,
+  currentScores: { competencyId: string; level: number }[],
+  limit = TEST_SUBSET_SIZE
+): CompetencyScore[] {
+  const req = getRoleRequirements().find(r => r.role === targetRole);
+  if (!req) return [];
+  const currentOf = new Map(currentScores.map(c => [c.competencyId, c.level]));
+  return [...req.requirements]
+    .map(r => ({
+      competencyId: r.competencyId,
+      level: r.level,
+      gap: Math.max(0, r.level - (currentOf.get(r.competencyId) ?? 0)),
+    }))
+    .sort((a, b) => b.level - a.level || b.gap - a.gap || a.competencyId.localeCompare(b.competencyId))
+    .slice(0, Math.max(0, limit))
+    .map(({ competencyId, level }) => ({ competencyId, level }));
+}
+
+export function buildRoleCompetencyTest(
+  targetRole: string,
+  roleLabel: string,
+  competencyIds: string[],
+  opts: { maxQuestions?: number; questionsPerCompetency?: number } = {}
+): CompetencyTest {
+  const maxQuestions = opts.maxQuestions ?? TEST_SUBSET_SIZE * QUESTIONS_PER_COMPETENCY;
+  const perCompetency = opts.questionsPerCompetency ?? QUESTIONS_PER_COMPETENCY;
+  const byCompetency = new Map<string, AssessmentQuestion[]>();
+  for (const q of assessmentQuestionBank) {
+    const list = byCompetency.get(q.competencyId) || [];
+    list.push(q);
+    byCompetency.set(q.competencyId, list);
+  }
+  const questions: AssessmentQuestion[] = [];
+  for (const competencyId of competencyIds) {
+    if (questions.length >= maxQuestions) break;
+    const comp = competencies.find(c => c.id === competencyId);
+    const bank = byCompetency.get(competencyId);
+    let qs: AssessmentQuestion[];
+    if (bank && bank.length >= 3) {
+      qs = bank;
+    } else if (comp) {
+      qs = generateStubCompetencyQuestions({
+        competencyId: comp.id,
+        competencyName: comp.name,
+        category: comp.category,
+        description: comp.description,
+      });
+    } else {
+      qs = [];
+    }
+    for (const q of qs) {
+      if (questions.length >= maxQuestions) break;
+      if (questions.filter(x => x.competencyId === competencyId).length >= perCompetency) break;
+      questions.push(shuffleQuestionOptions(q));
+    }
+  }
+  return {
+    id: `ct-${Date.now()}`,
+    role: targetRole,
+    roleLabel,
+    competencies: competencyIds.map(id => competencies.find(c => c.id === id)?.name || id),
+    questions,
+    takenAt: new Date().toISOString(),
+    locked: false,
+  };
+}
+
+/**
+ * Writes test-derived levels into the profile, keeping everything the test did
+ * not cover untouched — that is what makes a retake non-destructive.
+ *
+ * Provenance travels with each score so the results view can distinguish a
+ * tested level from a default without re-running anything.
+ */
+export function applyCompetencyTestToProfile(
+  profile: { competencies: CompetencyScore[] },
+  test: CompetencyTest,
+  selfRatings: Record<string, number> = {}
+): { competencies: CompetencyScore[] } {
+  if (!test.results || test.results.length === 0) return { competencies: profile.competencies };
+  const testedAt = test.takenAt || new Date().toISOString();
+  const byId = new Map(test.results.map(r => [r.competencyId, r]));
+
+  const merged = profile.competencies.map(c => {
+    const r = byId.get(c.competencyId);
+    if (!r) {
+      // Not covered by this test: keep the existing level and its provenance.
+      return c.source ? c : { ...c, source: 'default' as const };
+    }
+    return {
+      ...c,
+      level: r.derivedLevel,
+      source: 'tested' as const,
+      accuracy: r.accuracyPct,
+      selfRatedLevel: selfRatings[c.competencyId] ?? r.selfRatedLevel,
+      testedAt,
+    };
+  });
+
+  for (const r of test.results) {
+    if (!merged.some(c => c.competencyId === r.competencyId)) {
+      merged.push({
+        competencyId: r.competencyId,
+        level: r.derivedLevel,
+        source: 'tested',
+        accuracy: r.accuracyPct,
+        selfRatedLevel: selfRatings[r.competencyId] ?? r.selfRatedLevel,
+        testedAt,
+      });
+    }
+  }
+  return { competencies: merged };
+}
+
+/** Flattens a test + answers into the per-question records the breakdown view renders. */
+export function buildQuestionRecords(
+  test: CompetencyTest,
+  answers: (number | null)[]
+): AssessmentQuestionRecord[] {
+  return test.questions.map((q, position) => ({
+    position,
+    questionId: q.id,
+    competencyId: q.competencyId,
+    competencyName: q.competencyName,
+    prompt: q.prompt,
+    options: q.options,
+    correctIndex: q.correctIndex,
+    chosenIndex: answers[position] ?? null,
+    difficulty: q.difficulty,
+    explanation: q.explanation,
+  }));
 }
