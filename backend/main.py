@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import uuid
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -161,6 +162,16 @@ if _allowed_hosts:
 # keep working with no change and no special-casing.
 _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
+# Body-size caps. Uploads are already bounded by the quiz route's chunked
+# 20 MiB read, but every other endpoint accepts JSON and Starlette will happily
+# buffer an unbounded request body into memory before any validation runs —
+# a cheap memory-exhaustion DoS against a public endpoint such as
+# /api/auth/login. The Content-Length header is checked first (browsers, curl
+# and TestClient all set it); for a body without one we read it ourselves in
+# chunks so the cap is enforced against the streamed size, not after the fact.
+MAX_JSON_BODY_BYTES = 2 * 1024 * 1024
+MAX_MULTIPART_BODY_BYTES = 25 * 1024 * 1024  # 20 MiB file cap + form overhead
+
 
 @app.middleware("http")
 async def csrf_origin_guard(request: Request, call_next):
@@ -180,8 +191,56 @@ async def csrf_origin_guard(request: Request, call_next):
     return await call_next(request)
 
 
-# --------------------------------------------------------------------------
-# Correlation IDs, security headers, and error containment.
+async def _read_capped_body(request: Request, cap: int) -> Optional[bytes]:
+    """Read the request body, stopping the moment it exceeds `cap`.
+
+    Returns None when the body is too large (or unreadable), so the caller can
+    answer 413 before the whole thing is buffered. On success the bytes are
+    cached onto the request so FastAPI's own `request.body()` / `request.json()`
+    reuse them instead of trying to re-read an already-consumed stream.
+    """
+    chunks = []
+    total = 0
+    try:
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > cap:
+                return None
+            chunks.append(chunk)
+    except Exception:
+        return None
+    return b"".join(chunks)
+
+
+def _payload_too_large(request: Request) -> JSONResponse:
+    return _error_response(
+        request, status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, {"detail": "Request body too large."}
+    )
+
+
+@app.middleware("http")
+async def body_size_guard(request: Request, call_next):
+    if request.method not in _UNSAFE_METHODS:
+        return await call_next(request)
+    content_type = request.headers.get("content-type", "")
+    multipart = content_type.startswith("multipart/form-data")
+    cap = MAX_MULTIPART_BODY_BYTES if multipart else MAX_JSON_BODY_BYTES
+
+    length = request.headers.get("content-length")
+    if length is not None:
+        if not length.isdigit():
+            return _error_response(
+                request, status.HTTP_400_BAD_REQUEST, {"detail": "Invalid Content-Length."}
+            )
+        if int(length) > cap:
+            return _payload_too_large(request)
+
+    if not multipart:
+        body = await _read_capped_body(request, cap)
+        if body is None:
+            return _payload_too_large(request)
+        request._body = body
+    return await call_next(request)
 #
 # Every response carries a correlation id, and every log line for that request
 # carries the same one. Without it, the only way to tie a user's "it failed"

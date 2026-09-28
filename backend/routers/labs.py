@@ -6,12 +6,15 @@ and a timeout. DEMO-ONLY sandbox — not hardened for production use; do not run
 this against untrusted code in a shared environment without stronger isolation.
 
 SECURITY. This route is remote code execution by design, so it is treated as
-the most dangerous endpoint in the app. Three things were verified about the
-subprocess sandbox: it can read any file the server can read (so `backend/.env`,
-including SUPABASE_SERVICE_ROLE_KEY and the database password), it inherits the
-server's environment variables, and it has unrestricted outbound network access
-to exfiltrate them. RLIMIT_CPU / RLIMIT_AS / RLIMIT_NOFILE stop neither. A
-timeout is not a sandbox.
+the most dangerous endpoint in the app. The sandbox still cannot stop the
+executed code from reading any file the server can read (so an absolute path
+to `backend/.env`, including SUPABASE_SERVICE_ROLE_KEY and the database
+password) or from making outbound network calls to exfiltrate it. RLIMIT_CPU /
+RLIMIT_AS / RLIMIT_NOFILE stop neither of those. A timeout is not a sandbox.
+
+What has been hardened: the child runs in an isolated temp directory (so
+repo-relative reads fail) with a scrubbed environment (so `os.environ` cannot
+expose SUPABASE_*, DATABASE_URL, GROQ_* or other server secrets).
 
 Therefore POST /run requires a signed-in user, and it is refused outright once
 a real Supabase backend is configured, unless ALLOW_CODE_EXECUTION is
@@ -22,6 +25,7 @@ database is the signal that it is no longer a laptop demo.
 import json
 import os
 import resource
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -96,6 +100,33 @@ def _sandbox_limits():
             pass
 
 
+# Key names that may carry credentials or similar server secrets. The executed
+# child inherits whatever we pass as its environment, and os.environ is the
+# easiest exfiltration channel there is.
+_SENSITIVE_VAR_PREFIXES = (
+    "SUPABASE_", "DATABASE_URL", "GROQ_", "DEMO_", "COOKIE_",
+    "AUTH_", "CORS_", "ALLOWED_HOSTS", "MAX_UPLOAD_BYTES",
+    "FORWARDED_ALLOW_IPS", "EXPOSE_DEMO_PASSWORD",
+)
+
+
+def _sandbox_env() -> dict[str, str]:
+    """A minimal environment for the executed child.
+
+    Without this the lab inherits every variable the server runs with, and the
+    point of POST /run is to execute caller-supplied Python — so a signed-in
+    user could print SUPABASE_SERVICE_ROLE_KEY, the database URL or the Groq
+    key straight out of os.environ. The child gets only what the interpreter
+    needs to run, plus whatever local demo flags are deliberately made visible.
+    """
+    keep = {"PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP", "PYTHONIOENCODING"}
+    env = {k: v for k, v in os.environ.items() if k in keep and v}
+    for k in list(env):
+        if k.startswith(_SENSITIVE_VAR_PREFIXES) or "SECRET" in k.upper() or "KEY" in k.upper():
+            env.pop(k)
+    return env
+
+
 def _format_syntax_error(e: SyntaxError, code: str) -> str:
     line, col = e.lineno, e.offset or 0
     caret = ""
@@ -136,17 +167,23 @@ def run_python(
         return {"ok": False, "output": "", "error": f"Could not compile code: {e}", "durationMs": 0}
 
     start = time.perf_counter()
-    path = None
+    workdir = None
     try:
-        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+        workdir = tempfile.mkdtemp(prefix="sakshamai-lab-", suffix="-tmp")
+        snippet = os.path.join(workdir, "snippet.py")
+        with open(snippet, "w") as f:
             f.write(code)
-            path = f.name
+        # cwd is the temp dir, not the repo, so relative reads like
+        # `open("backend/.env")` cannot reach the server's own files. The env
+        # is scrubbed in _sandbox_env() so os.environ cannot leak credentials.
         proc = subprocess.run(
-            [sys.executable, "-I", "-u", path],
+            [sys.executable, "-I", "-u", "snippet.py"],
             capture_output=True,
             text=True,
             timeout=RUN_TIMEOUT,
             preexec_fn=_sandbox_limits,
+            env=_sandbox_env(),
+            cwd=workdir,
         )
     except subprocess.TimeoutExpired:
         return {
@@ -156,9 +193,9 @@ def run_python(
             "durationMs": int((time.perf_counter() - start) * 1000),
         }
     finally:
-        if path and os.path.exists(path):
+        if workdir and os.path.exists(workdir):
             try:
-                os.unlink(path)
+                shutil.rmtree(workdir, ignore_errors=True)
             except OSError:
                 pass
 

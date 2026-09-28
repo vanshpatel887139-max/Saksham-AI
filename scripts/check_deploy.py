@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-deployment checks for the seven review categories.
+"""Pre-deployment checks for the eight review categories.
 
 Run:
     DATABASE_URL=postgresql://... backend/.venv/bin/python scripts/check_deploy.py
@@ -944,6 +944,106 @@ def check_database() -> None:
 
 
 # ===========================================================================
+# 8. Input handling
+# ===========================================================================
+def check_input_handling() -> None:
+    section("8. input handling")
+    from fastapi import HTTPException
+    from fastapi.testclient import TestClient
+
+    # -- uploads: strict extension allowlist, decided server-side -------------
+    import routers.quiz as quiz_module
+
+    try:
+        quiz_module.extract_text("notes.exe", b"junk")
+        rejected = "no error raised"
+    except HTTPException as exc:
+        rejected = "" if exc.status_code == 415 else f"status {exc.status_code}"
+    check(
+        "a non-coursehandout upload extension is rejected with 415",
+        not rejected,
+        rejected,
+    )
+    check(
+        "a missing upload extension is rejected",
+        not _raises_not_415(lambda: quiz_module.extract_text("notes", b"junk")),
+        "expected 415",
+    )
+    check(
+        "a txt upload still extracts as text",
+        quiz_module.extract_text("handout.txt", b"hello") == "hello",
+    )
+
+    # -- the lab sandbox scrubs server secrets from the child env -------------
+    import routers.labs as labs_module
+
+    scrubbed = labs_module._sandbox_env()
+    leaked = [
+        k for k in scrubbed
+        if k.startswith(("SUPABASE_", "DATABASE_URL", "GROQ_", "DEMO_", "COOKIE_", "AUTH_"))
+        or "KEY" in k.upper() or "SECRET" in k.upper()
+    ]
+    check(
+        "the code-execution sandbox strips credential-laden env vars",
+        not leaked,
+        f"leaked: {leaked}",
+    )
+    check(
+        "the sandbox keeps the interpreter's runtime vars (PATH)",
+        "PATH" in scrubbed,
+    )
+    labs_src = (ROOT / "backend" / "routers" / "labs.py").read_text()
+    check(
+        "the sandbox runs the child in an isolated temp directory",
+        "env=_sandbox_env()" in labs_src and "cwd=workdir" in labs_src,
+    )
+
+    # -- oversized JSON bodies are refused before they are parsed -------------
+    import main
+
+    main_src = (ROOT / "backend" / "main.py").read_text()
+    body_cap = getattr(main, "MAX_JSON_BODY_BYTES", 0)
+    check(
+        "main.py enforces a bounded cap on JSON request bodies",
+        0 < body_cap < 10 * 1024 * 1024,
+        f"cap={body_cap}",
+    )
+    check(
+        "the multipart cap is larger than the upload cap it wraps",
+        getattr(main, "MAX_MULTIPART_BODY_BYTES", 0) > quiz_module.MAX_UPLOAD_BYTES,
+    )
+
+    client = TestClient(main.app, raise_server_exceptions=False)
+    big = client.post(
+        "/api/auth/login",
+        content=b"x" * (body_cap + 1024 * 1024),
+        headers={"content-type": "application/json"},
+    )
+    check(
+        "a JSON body over the cap returns 413 before any route runs",
+        big.status_code == 413,
+        f"status={big.status_code}",
+    )
+    check(
+        "the 413 still carries the security headers",
+        big.headers.get("x-content-type-options") == "nosniff",
+    )
+
+
+def _raises_not_415(fn) -> bool:
+    """True when `fn` raises something that is not a 415."""
+    from fastapi import HTTPException
+
+    try:
+        fn()
+    except HTTPException as exc:
+        return exc.status_code != 415
+    except Exception:
+        return True  # an unexpected exception is exactly as wrong
+    return True  # no error raised
+
+
+# ===========================================================================
 def main() -> int:
     global PRODUCTION_MODE
     parser = argparse.ArgumentParser()
@@ -971,6 +1071,7 @@ def main() -> int:
         check_rate_limits,
         check_cors,
         check_database,
+        check_input_handling,
     ):
         try:
             fn()

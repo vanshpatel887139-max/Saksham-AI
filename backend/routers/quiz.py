@@ -33,6 +33,9 @@ router = APIRouter(prefix="/api/quiz", tags=["quiz"])
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 UPLOAD_CHUNK = 1024 * 1024
 
+# Extensions the upload endpoint will accept, enforced in extract_text().
+_ALLOWED_UPLOAD_TYPES = {"pdf", "docx", "pptx", "ppt", "srt", "vtt", "txt"}
+
 
 def _upload_limit() -> int:
     try:
@@ -143,7 +146,21 @@ def extract_text_from_transcript(data: bytes, is_vtt: bool) -> str:
 
 
 def extract_text(filename: str, data: bytes) -> str:
-    name = filename.lower().rstrip("?")
+    # Strict allowlist, decided by extension and applied server-side. The
+    # client's reported Content-Type is not trusted (it is attacker-supplied),
+    # and there is no on-disk storage or serving, so there is nothing to scan
+    # with — the lead control is simply refusing anything we have no extractor
+    # for instead of silently parsing an unknown format as text. An .html or
+    # .svg uploaded past this point could never execute (it is never written
+    # to disk or returned with an HTML content type), but rejecting it keeps
+    # the surface predictable.
+    name = (filename or "").lower().rstrip("?")
+    ext = name.rsplit(".", 1)[-1] if "." in name else ""
+    if ext not in _ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported file type. Allowed: pdf, docx, pptx, ppt, srt, vtt, txt.",
+        )
     if name.endswith(".pdf"):
         return extract_text_from_pdf(data)
     if name.endswith(".docx"):
