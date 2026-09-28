@@ -36,13 +36,15 @@ from auth_tokens import (
 )
 from database import get_db_connection
 from models import LoginRequest
+from log_safety import redact
 from routers.users import USER_PROFILE_COLUMNS, fetch_user, user_to_dict
 import rate_limit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# Only the address is logged, never the token or the password, so this stays
-# safe to ship to an aggregator.
+# The account-link refusal warning below still logs *something* for an operator
+# to find, but the address value is passed through log_safety.redact(), so an
+# email becomes [REDACTED]. The token and the password are never logged at all.
 logger = logging.getLogger("sakshamai.auth")
 
 # The personas the demo picker offers by default: one administrator and one
@@ -235,7 +237,7 @@ def login(req: LoginRequest, request: Request, response: Response):
     # _linkable_emails: the credential's email is what selects the row, and on a
     # project with public sign-up open, that email is attacker-chosen.
     if email not in _linkable_emails():
-        logger.warning("refused account link for unlisted address %s", email)
+        logger.warning("refused account link for unlisted address %s", redact(email))
         raise HTTPException(
             status_code=403,
             detail="This account is not provisioned for SakshamAI. "

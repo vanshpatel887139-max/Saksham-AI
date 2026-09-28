@@ -401,6 +401,28 @@ console logging in the frontend; no PII in browser storage; no cookies; no
 password storage anywhere; the iGOT plan, quiz generation and assessment
 generation LLM calls already sent no personal data.
 
+## Audit addendum (second pass)
+
+A re-audit of the whole pipeline (collection points, third-party egress,
+password handling, cookies/storage, response filtering, deletion, log hygiene)
+against the current code found two more log paths that could carry user data.
+Both were closed, and the gate now pins both so the "no log line contains user
+data" claim above stays enforceable:
+
+| # | Finding | Severity | Fix |
+|---|---|---|---|
+| 9 | `POST /api/auth/login` logged the raw email on the account-link refusal path (`logger.warning("refused account link for unlisted address %s", email)`) | Medium — an address hitting a real deployment would land in log storage; unauthenticated emails could also spam the log | Value passed through `log_safety.redact()` → `[REDACTED]`; the warning is kept as an ops signal. Gate asserts the refusal logs the event but never the address |
+| 10 | The catch-all unhandled-exception handler logged the full traceback (`exc_info=exc`), so an escaped driver/validator exception whose message embeds a PII value (e.g. a psycopg unique-violation message containing an email) would write it raw | Medium | Class name plus `redact(str(exc))` when `SAKSHAMAI_LOG_DEBUG` is off; the raw traceback is written only when that developer-only flag is on. Gate asserts both branches |
+
+Re-audit confirmed already correct and unchanged: every data-collection
+endpoint; the single-persistence-in-Postgres statement; minimised advisor
+payload and the other three Groq calls; bcrypt-via-Supabase and no local
+credential store; the `httpOnly`/`Secure`/`SameSite=Strict` session cookie with
+no PII and no scripts-visible storage; allowlist-based response filtering; and
+`DELETE /api/users/me` erasure with receipt, cache invalidation and Auth
+deletion. No analytics, error-tracking, payment or email SDK exists in any
+dependency list — the only third parties receiving data are Supabase and Groq.
+
 ## Re-running the checks
 
 ```bash

@@ -28,7 +28,7 @@ import deploy_config
 import security_headers
 from database import close_pool, healthcheck, init_db
 from auth_tokens import SESSION_COOKIE
-from log_safety import RedactingFormatter, scrub_access_log
+from log_safety import RedactingFormatter, scrub_access_log, debug_enabled, redact
 from routers import auth, users, competency, courses, quiz, admin, assistant, labs, igot, assessment, stats, dashboard
 
 logger = logging.getLogger("sakshamai.api")
@@ -268,14 +268,28 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     specific and still take precedence.
     """
     correlation_id = getattr(request.state, "correlation_id", "unknown")
-    # Full detail — class, message, traceback, request target — to the log only.
-    logger.error(
-        "unhandled error correlation_id=%s %s %s",
-        correlation_id,
-        request.method,
-        _redacted_target(request),
-        exc_info=exc,
-    )
+    # Class name plus a *redacted* message to the log. A full traceback is
+    # useful locally, but the exception value can carry user data — a psycopg
+    # unique-violation message embeds the offending value, for example — so the
+    # raw traceback is only written when SAKSHAMAI_LOG_DEBUG is on (a
+    # developer-only flag, matching log_safety.debug_enabled()).
+    if debug_enabled():
+        logger.error(
+            "unhandled error correlation_id=%s %s %s",
+            correlation_id,
+            request.method,
+            _redacted_target(request),
+            exc_info=exc,
+        )
+    else:
+        logger.error(
+            "unhandled error correlation_id=%s %s %s exc=%s: %s",
+            correlation_id,
+            request.method,
+            _redacted_target(request),
+            type(exc).__name__,
+            redact(str(exc)),
+        )
     if isinstance(exc, HTTPException):
         return _error_response(
             request,

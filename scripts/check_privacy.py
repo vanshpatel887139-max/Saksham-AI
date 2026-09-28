@@ -483,6 +483,22 @@ try:
     dsc = next((x for x in dev.headers.get_list("set-cookie") if x.startswith("sakshamai_session=")), "")
     check("no Secure on loopback http (dev only)", "Secure" not in dsc, dsc)
 
+    # The account-link refusal must keep working as an ops signal while the
+    # address itself stays out of the log. Trigger it and capture the warning.
+    _auth_buf = io.StringIO()
+    _auth_h = logging.StreamHandler(_auth_buf)
+    _auth_h.setFormatter(logging.Formatter("%(message)s"))
+    _auth_lg = logging.getLogger("sakshamai.auth")
+    _auth_lg.addHandler(_auth_h); _auth_lg.setLevel(logging.WARNING)
+    _evil = client.post("/api/auth/login",
+                        json={"email": "stranger@example.net", "password": "x"},
+                        headers={"Origin": "http://localhost:3000"})
+    _auth_lg.removeHandler(_auth_h)
+    _auth_logged = _auth_buf.getvalue()
+    check("unlisted-address sign-in is refused (403)", _evil.status_code == 403, _evil.status_code)
+    check("refusal is still logged (ops signal kept)", "refused account link" in _auth_logged, _auth_logged)
+    check("refusal log does NOT contain the email", "stranger@example.net" not in _auth_logged, _auth_logged)
+
     ck = {"sakshamai_session": FAKE}
     check("cookie authenticates a request",
           client.get("/api/auth/me", cookies=ck).status_code == 200)
@@ -533,6 +549,14 @@ check("logging out also tells the server", "apiLogout()" in ctx)
 check("no build artifact contains a stored session token",
       not any("sakshamai.token" in f.read_text(errors="ignore")
               for f in pathlib.Path(__file__).resolve().parent.parent.joinpath("dist").rglob("*.js")))
+
+# The two remaining code paths that could put user data into a log. Pin both
+# so the "no log line contains user data" claim stays true as the code moves.
+auth_src = (pathlib.Path(__file__).resolve().parent.parent / "backend" / "routers" / "auth.py").read_text()
+check("auth refusal passes the address through redact()", "redact(email)" in auth_src, "auth.py")
+main_src = (pathlib.Path(__file__).resolve().parent.parent / "backend" / "main.py").read_text()
+check("unhandled-error handler redacts the exception text", "redact(str(exc))" in main_src, "main.py")
+check("full exception traceback only under a debug flag", 'if debug_enabled():' in main_src, "main.py")
 
 
 print("\n" + ("ALL PRIVACY CHECKS PASS" if not FAILS else f"{len(FAILS)} FAILURES: {FAILS}"))
