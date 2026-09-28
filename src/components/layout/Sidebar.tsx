@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useApp, useI18n } from '../../store/AppContext';
+import Logo from '../Logo';
 import {
   LayoutDashboard, User, BarChart3, Target, Route, BookOpen, Brain,
   ClipboardList, PieChart, Settings, ChevronLeft, ChevronRight, LogOut, FlaskConical,
@@ -13,7 +14,6 @@ export default function Sidebar() {
   const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: t('Dashboard', 'डैशबोर्ड') },
     { to: '/profile', icon: User, label: t('My Profile', 'मेरी प्रोफ़ाइल') },
-    { to: '/competency', icon: BarChart3, label: t('Competency Assessment', 'दक्षता मूल्यांकन') },
     { to: '/skill-gaps', icon: Target, label: t('Skill Gaps', 'स्किल गैप') },
     { to: '/learning-path', icon: Route, label: t('Learning Path', 'सीखने का मार्ग') },
     { to: '/courses', icon: BookOpen, label: t('Course Catalogue', 'कोर्स सूची') },
@@ -21,6 +21,15 @@ export default function Sidebar() {
     { to: '/quiz', icon: Brain, label: t('AI Quiz Generator', 'एआई क्विज़ जनरेटर') },
     { to: '/assessments', icon: ClipboardList, label: t('My Assessments', 'मेरे आकलन') },
   ];
+
+  // Learner-only: the competency report and test write derived levels back to
+  // the profile, and an admin has no target role to be assessed against.
+  if (user?.role !== 'admin') {
+    navItems.splice(2, 0,
+      { to: '/competency', icon: BarChart3, label: t('Competency Assessment', 'दक्षता मूल्यांकन') },
+      { to: '/competency-test', icon: ClipboardList, label: t('Competency Test', 'दक्षता परीक्षण') },
+    );
+  }
 
   if (user?.role === 'admin') {
     navItems.push({ to: '/analytics', icon: PieChart, label: t('Analytics', 'एनालिटिक्स') });
@@ -34,17 +43,24 @@ export default function Sidebar() {
 
   return (
     <aside className={`fixed left-0 top-0 h-full bg-navy-800 text-white transition-all duration-300 z-30 flex flex-col ${sidebarOpen ? 'w-64' : 'w-16'}`}>
-      <div className="flex items-center justify-between p-4 border-b border-navy-700">
-        {sidebarOpen && (
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-saffron-500 rounded-lg flex items-center justify-center font-bold text-sm">S</div>
-            <div>
+      <div className="flex items-center justify-between p-3 border-b border-navy-700">
+        {sidebarOpen ? (
+          <div className="flex items-center gap-2 min-w-0">
+            {/* The parent is a flex row with items-center, so this centres
+                against the two-line label without any nudging margin.
+                alt="" because the wordmark beside it already names the app. */}
+            <Logo variant="icon" height={28} alt="" />
+            <div className="min-w-0">
               <h1 className="text-sm font-bold leading-tight">SakshamAI</h1>
-              <p className="text-[10px] text-navy-300 leading-tight">{language === 'hi' ? 'स्किल इंटेलिजेंस' : 'Skill Intelligence'}</p>
+              <p className="text-[10px] text-navy-300 leading-tight truncate">{language === 'hi' ? 'स्किल इंटेलिजेंस' : 'Skill Intelligence'}</p>
             </div>
           </div>
+        ) : (
+          /* Same asset as the expanded rail, just smaller. The 24px square
+             still clears the toggle button in the w-16 collapsed rail. */
+          <Logo variant="icon" height={24} alt="" />
         )}
-        <button onClick={toggleSidebar} className="p-1 rounded hover:bg-navy-700 cursor-pointer">
+        <button onClick={toggleSidebar} className="p-1 rounded hover:bg-navy-700 cursor-pointer" aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
           {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
         </button>
       </div>

@@ -1,4 +1,5 @@
 import { useApp } from '../../store/AppContext';
+import Logo from '../Logo';
 import { Bell, Menu } from 'lucide-react';
 import { useState } from 'react';
 
@@ -13,6 +14,11 @@ export default function Header({ title }: { title: string }) {
         <button onClick={toggleSidebar} className="lg:hidden p-2 rounded-lg hover:bg-navy-50 cursor-pointer">
           <Menu size={20} className="text-navy-600" />
         </button>
+        {/* 28px, matching the expanded sidebar so the two do not read as
+            different logos. The items-center on the parent row does the
+            vertical alignment against the title.
+            alt="" because the page title sits right next to it. */}
+        <Logo variant="icon" height={28} alt="" />
         <h1 className="text-lg font-semibold text-navy-800">{language === 'hi' ? `🇮🇳 ${title}` : title}</h1>
       </div>
 

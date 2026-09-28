@@ -1,9 +1,16 @@
 """Admin / analytics routes with organization-wide data."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from auth_tokens import require_admin
 from database import get_db_connection
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+# Applied to the whole router rather than per-route: this is organisation-wide
+# data about every learner, so there is no sensible public member of it. A
+# learner calling /api/admin/overview previously got a full staff roster back.
+router = APIRouter(
+    prefix="/api/admin", tags=["admin"], dependencies=[Depends(require_admin)]
+)
 
 
 def linear_forecast(points):
@@ -27,22 +34,49 @@ def linear_forecast(points):
 
 @router.get("/overview")
 def overview():
+    """Organisation-wide totals, computed from real learner rows.
+
+    Previously every number here was a literal (1240 hours, 68% completion)
+    and the counts came from `org_learners`, a table of nine fictional
+    officials that shared no rows with `users` — so the dashboard described an
+    organisation that did not exist in the database.
+
+    `learner_directory` derives the same shape from real learners, so this now
+    agrees with the rest of the app. See /charts and /forecast below: those
+    remain deliberately hardcoded sample series.
+    """
     conn = get_db_connection()
     try:
-        total = conn.execute("SELECT COUNT(*) AS c FROM org_learners").fetchone()["c"]
-        active = conn.execute("SELECT COUNT(*) AS c FROM org_learners WHERE status = 'Active'").fetchone()["c"]
-        learners = conn.execute("SELECT * FROM org_learners").fetchall()
-        avg_comp = sum(l["competency"] for l in learners) / total if total else 0
-        total_gaps = sum(l["gaps"] for l in learners)
-        total_hours = 1240
-        completion_rate = 68
+        learners = conn.execute("SELECT * FROM learner_directory").fetchall()
+        total = len(learners)
+        active = sum(1 for l in learners if l["status"] == "Active")
+        avg_comp = (
+            round(sum(float(l["competency"] or 0) for l in learners) / total, 1)
+            if total else 0
+        )
+        total_gaps = sum(int(l["gaps"] or 0) for l in learners)
+
+        # Real learning hours: the declared duration of every module the
+        # organisation has actually completed, via module_duration_hours().
+        hours = conn.execute(
+            "SELECT COALESCE(SUM(module_duration_hours(course_id, module_title)), 0) AS h "
+            "FROM module_progress"
+        ).fetchone()["h"]
+
+        enroll = conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "COUNT(*) FILTER (WHERE progress >= 100) AS done FROM course_enrollments"
+        ).fetchone()
+        completion_rate = (
+            round((enroll["done"] / enroll["total"]) * 100) if enroll["total"] else 0
+        )
 
         return {
             "totalOfficials": total,
             "activeLearners": active,
             "completionRate": completion_rate,
-            "avgCompetency": round(avg_comp, 1),
-            "totalLearningHours": total_hours,
+            "avgCompetency": avg_comp,
+            "totalLearningHours": round(float(hours or 0), 1),
             "highPriorityGaps": total_gaps,
         }
     finally:
@@ -53,7 +87,9 @@ def overview():
 def list_learners():
     conn = get_db_connection()
     try:
-        rows = conn.execute("SELECT * FROM org_learners").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM learner_directory ORDER BY competency DESC, name"
+        ).fetchall()
         return [
             {
                 "name": r["name"],
@@ -74,8 +110,12 @@ def list_learners():
 def forecast():
     """Predictive analytics: extrapolate skill demand and readiness trends.
 
-    Uses least-squares linear regression over the last 6 months of
-    engagement data to forecast the next 3 quarters.
+    NOTE: the six-month `engagement` series below is hardcoded sample data, not
+    a query. It was left as-is deliberately when the rest of this router was
+    moved onto real aggregates — the regression maths is real, but it is
+    regressing a fixed series. Wire it to dated activity data before treating
+    any number on this endpoint as meaningful. `/overview` and `/learners` are
+    NOT in that category; those are computed from real learner rows.
     """
     conn = get_db_connection()
     try:
@@ -87,14 +127,22 @@ def forecast():
             {"month": "Aug", "hours": 210, "completions": 22},
             {"month": "Sep", "hours": 195, "completions": 24},
         ]
-        total = conn.execute("SELECT COUNT(*) AS c FROM org_learners").fetchone()["c"] or 1
+        total = conn.execute("SELECT COUNT(*) AS c FROM learner_directory").fetchone()["c"] or 1
         avg_requested = max(1, len(engagement))
         readiness = [completions / max(total, 1) for completions in (8, 11, 15, 18, 22, 24)]
         hours_pts = [{"y": e["hours"]} for e in engagement]
-        compl_pts = [{"y": e["completions"]} for e in engagement]
         readiness_pts = [{"y": v} for v in readiness]
 
-        future_trend = linear_forecast(hours_pts + compl_pts)
+        # Forecast each series on its own. Concatenating hours and completions
+        # into a single regression looked reasonable but is not: the two are
+        # different units an order of magnitude apart, so the joined series is
+        # bimodal -- six points near 200, then six near 20 -- and the fitted
+        # slope is dominated by the step between the blocks rather than by
+        # either trend. The "hours" figure it produced was the average of two
+        # unrelated quantities. `completions` is derived from the readiness
+        # trend instead, which is on a per-learner scale and is multiplied
+        # back up by headcount.
+        future_trend = linear_forecast(hours_pts)
         readiness_trend = linear_forecast(readiness_pts)
 
         return {
@@ -125,7 +173,13 @@ def forecast():
 
 @router.get("/charts")
 def charts():
-    """Static mock data matching the frontend charts."""
+    """Static mock data matching the frontend charts.
+
+    Deliberately hardcoded and deliberately left that way: these series are
+    illustrative chart filler for the demo, not measurements. Unlike
+    /overview and /learners, nothing here is derived from the database. Treat
+    every value below as sample data.
+    """
     return {
         "gapDistribution": [
             {"name": "High", "value": 34},

@@ -1,4 +1,4 @@
-import { Competency, RoleRequirement, Course } from '../types';
+import { Competency, RoleRequirement, Course, AssessmentQuestion, CompetencyCategory } from '../types';
 
 export const competencies: Competency[] = [
   { id: "survey-design", name: "Survey Design", category: "Statistical", description: "Designing effective surveys and data collection instruments" },
@@ -738,3 +738,70 @@ export const courses: Course[] = [
     progress: 0,
   },
 ];
+
+export const assessmentQuestionBank: AssessmentQuestion[] = [
+  // python
+  { id: "q-python-1", competencyId: "python", competencyName: "Python", category: "Technical" as CompetencyCategory, difficulty: 1, prompt: "Which Python function returns the number of items in a list?", options: ["len()", "size()", "count()", "length()"], correctIndex: 0, explanation: "len() is the built-in function for length in Python." },
+  { id: "q-python-2", competencyId: "python", competencyName: "Python", category: "Technical" as CompetencyCategory, difficulty: 2, prompt: "In pandas, which method returns the first few rows of a DataFrame?", options: ["head()", "first()", "top()", "begin()"], correctIndex: 0, explanation: "df.head(n) returns the first n rows (default 5)." },
+  { id: "q-python-3", competencyId: "python", competencyName: "Python", category: "Technical" as CompetencyCategory, difficulty: 3, prompt: "Which pandas method is used to summarize a DataFrame by groups?", options: ["groupby()", "pivot_pick()", "split()", "filter()"], correctIndex: 0, explanation: "df.groupby('col').agg() summarizes data per group." },
+  { id: "q-python-4", competencyId: "python", competencyName: "Python", category: "Technical" as CompetencyCategory, difficulty: 4, prompt: "What does df.isin(values) return?", options: ["A boolean DataFrame of same shape", "A list of duplicate rows", "A merged DataFrame", "A sorted Series"], correctIndex: 0, explanation: "isin() returns a boolean mask matching values across the DataFrame." },
+  // sampling
+  { id: "q-sampling-1", competencyId: "sampling", competencyName: "Sampling", category: "Statistical" as CompetencyCategory, difficulty: 1, prompt: "What is the main purpose of sampling?", options: ["To make inferences about a population from a subset", "To replace the census", "To remove non-response bias completely", "To list all enumeration units"], correctIndex: 0, explanation: "Sampling infers population parameters from a representative subset with measurable error." },
+  { id: "q-sampling-2", competencyId: "sampling", competencyName: "Sampling", category: "Statistical" as CompetencyCategory, difficulty: 2, prompt: "Which sampling method divides the population into homogeneous groups and samples each?", options: ["Stratified sampling", "Simple random", "Convenience", "Snowball"], correctIndex: 0, explanation: "Stratified sampling splits into strata and samples within each." },
+  { id: "q-sampling-3", competencyId: "sampling", competencyName: "Sampling", category: "Statistical" as CompetencyCategory, difficulty: 3, prompt: "The standard error of the mean primarily measures what?", options: ["Sampling variability of the estimate", "Bias of the estimator", "Non-response", "Coverage error"], correctIndex: 0, explanation: "Standard error expresses how much the sample estimate varies around the population mean." },
+  // data-visualization
+  { id: "q-dv-1", competencyId: "data-visualization", competencyName: "Data Visualization", category: "Technical" as CompetencyCategory, difficulty: 1, prompt: "Which chart best shows a trend over time?", options: ["Line chart", "Pie chart", "Scatterplot", "Treemap"], correctIndex: 0, explanation: "Line charts connect points in time to reveal trends." },
+  { id: "q-dv-2", competencyId: "data-visualization", competencyName: "Data Visualization", category: "Technical" as CompetencyCategory, difficulty: 2, prompt: "When comparing parts of a whole, which chart is most appropriate?", options: ["Pie or stacked bar chart", "Scatterplot", "Box plot", "Histogram"], correctIndex: 0, explanation: "Part-to-whole relationships map well to pie or stacked bars." },
+  { id: "q-dv-3", competencyId: "data-visualization", competencyName: "Data Visualization", category: "Technical" as CompetencyCategory, difficulty: 3, prompt: "Which practice improves chart readability?", options: ["Start the y-axis at zero unless there is a reason", "Use rainbow gradients by default", "Add non-data ink", "Skip axis labels"], correctIndex: 0, explanation: "Truncated axes distort comparison; zero-based axes keep proportions honest." },
+  // communication
+  { id: "q-comm-1", competencyId: "communication", competencyName: "Communication", category: "Behavioural" as CompetencyCategory, difficulty: 1, prompt: "What is the clearest way to structure an official report?", options: ["Executive summary, findings, methodology, annexes", "Methodology last, findings first", "Raw data only", "Conclusions without context"], correctIndex: 0, explanation: "A logical flow from summary to findings to methods serves varied readers." },
+  { id: "q-comm-2", competencyId: "communication", competencyName: "Communication", category: "Behavioural" as CompetencyCategory, difficulty: 2, prompt: "When presenting statistical findings to policymakers, you should:", options: ["Emphasize insights and uncertainty, not jargon", "Use maximum technical jargon", "Hide margins of error", "Avoid visuals"], correctIndex: 0, explanation: "Non-specialist audiences need clear, quantified messages with confidence framing." },
+  { id: "q-comm-3", competencyId: "communication", competencyName: "Communication", category: "Behavioural" as CompetencyCategory, difficulty: 4, prompt: "A table footnoted as 'data may not sum to 100% due to rounding' is an example of:", options: ["Transparent metadata communication", "A data fabrication", "A random error", "A coverage gap"], correctIndex: 0, explanation: "Documenting rounding and limitations is transparent metadata practice." },
+  // ai-ml
+  { id: "q-aiml-1", competencyId: "ai-ml", competencyName: "AI/ML", category: "Technical" as CompetencyCategory, difficulty: 2, prompt: "What is the distinguishing trait of supervised learning?", options: ["Labels are provided during training", "No output data exists", "It clusters unlabeled data", "It only runs in the cloud"], correctIndex: 0, explanation: "Supervised learning trains on labeled examples to map inputs to known outputs." },
+  { id: "q-aiml-2", competencyId: "ai-ml", competencyName: "AI/ML", category: "Technical" as CompetencyCategory, difficulty: 3, prompt: "Which metric is best for evaluating an imbalanced classification model?", options: ["F1-score", "Raw accuracy", "Number of epochs", "Learning rate"], correctIndex: 0, explanation: "Accuracy misleads on imbalanced data; F1 balances precision and recall." },
+  { id: "q-aiml-3", competencyId: "ai-ml", competencyName: "AI/ML", category: "Technical" as CompetencyCategory, difficulty: 4, prompt: "A model that performs well on training data but poorly on unseen data is said to be:", options: ["Overfitting", "Underfitting", "Converged", "Regularized"], correctIndex: 0, explanation: "Overfitting memorizes training noise and fails to generalize." },
+];
+
+export interface StubQuestionSpec {
+  competencyId: string;
+  competencyName: string;
+  category: CompetencyCategory;
+  description: string;
+}
+
+export function generateStubCompetencyQuestions(spec: StubQuestionSpec): AssessmentQuestion[] {
+  return [1, 2, 3].map((tier, i) => ({
+    id: `q-${spec.competencyId}-stub-${i + 1}`,
+    competencyId: spec.competencyId,
+    competencyName: spec.competencyName,
+    category: spec.category,
+    difficulty: (tier as 1 | 2 | 3 | 4 | 5),
+    prompt: `In the context of ${spec.competencyName}, which best describes its core role?`,
+    options: [spec.description, "The opposite of official statistics", "A hardware networking term", "An unrelated administrative formality"],
+    correctIndex: 0,
+    explanation: `${spec.competencyName} focuses on: ${spec.description}`,
+  }));
+}
+
+/**
+ * Returns a copy of `q` with its options reordered and `correctIndex` remapped to
+ * the new position. The bank authors every question with the answer first, so
+ * without this a user who always picks option A scores 100%. `rng` is injectable
+ * for deterministic tests.
+ */
+export function shuffleQuestionOptions(
+  q: AssessmentQuestion,
+  rng: () => number = Math.random
+): AssessmentQuestion {
+  const correct = q.options[q.correctIndex];
+  if (correct === undefined) return q;
+  const distractors = q.options.filter((_, i) => i !== q.correctIndex);
+  for (let i = distractors.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [distractors[i], distractors[j]] = [distractors[j], distractors[i]];
+  }
+  const correctIndex = Math.floor(rng() * (distractors.length + 1));
+  distractors.splice(correctIndex, 0, correct);
+  return { ...q, options: distractors, correctIndex };
+}

@@ -7,9 +7,10 @@ same database rows so the feature always works.
 """
 
 import json
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from auth_tokens import Identity, current_identity
 from database import get_db_connection
 from llm import LLMUnavailableError, llm_available, model_name, system, user, chat, extract_json
 from routers.logic import row_to_course
@@ -28,26 +29,26 @@ class PlanRequest(BaseModel):
 
 
 def _gaps_and_courses(db, user_id: str, target_role: str):
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
     if not user:
         return None, None, None
-    role = target_role or user["current_role"] or "Data Analyst"
+    role = target_role or user["target_role"] or "Data Analyst"
 
     scores = {
         r["competency_id"]: r["level"]
         for r in db.execute(
-            "SELECT competency_id, level FROM competency_scores WHERE user_id = ?", (user_id,)
+            "SELECT competency_id, level FROM competency_scores WHERE user_id = %s", (user_id,)
         ).fetchall()
     }
     rows = db.execute(
-        "SELECT competency_id, level FROM role_requirements WHERE role = ?", (role,)
+        "SELECT competency_id, level FROM role_requirements WHERE role = %s", (role,)
     ).fetchall()
     gaps = []
     for r in rows:
         gap = max(0, r["level"] - scores.get(r["competency_id"], 0))
         if gap > 0:
             comp = db.execute(
-                "SELECT name FROM competencies WHERE id = ?", (r["competency_id"],)
+                "SELECT name FROM competencies WHERE id = %s", (r["competency_id"],)
             ).fetchone()
             gaps.append({
                 "competency": comp["name"],
@@ -180,7 +181,10 @@ def _plan_from_rules(role: str, gaps: list, courses: list, weeks: int) -> dict:
 
 
 @router.post("/plan")
-def generate_plan(req: PlanRequest):
+def generate_plan(req: PlanRequest, identity: Identity = Depends(current_identity)):
+    # The plan is built from the caller's real competency gaps, so the caller
+    # must not be able to name somebody else and read their gap analysis.
+    req.user_id = identity.id
     weeks = max(1, min(int(req.weeks or DEFAULT_WEEKS), MAX_WEEKS))
     db = get_db_connection()
     try:

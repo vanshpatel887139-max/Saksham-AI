@@ -14,6 +14,7 @@ import QuizGeneratorPage from './pages/QuizGeneratorPage';
 import AssessmentsPage from './pages/AssessmentsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import SettingsPage from './pages/SettingsPage';
+import CompetencyTestPage from './pages/CompetencyTestPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useApp();
@@ -25,6 +26,16 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, user } = useApp();
   if (!isAuthenticated) return <Navigate to="/" replace />;
   if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+// The competency test writes derived levels back into the profile, so it is a
+// learner-only flow. Admins have no target role of their own — letting them in
+// would silently grade them against whichever role happens to be selected.
+function LearnerRoute({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, user } = useApp();
+  if (!isAuthenticated) return <Navigate to="/" replace />;
+  if (user?.role === 'admin') return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -48,7 +59,7 @@ function AppRoutes() {
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/competency" element={<CompetencyPage />} />
+        <Route path="/competency" element={<LearnerRoute><CompetencyPage /></LearnerRoute>} />
         <Route path="/skill-gaps" element={<SkillGapsPage />} />
         <Route path="/learning-path" element={<LearningPathPage />} />
         <Route path="/courses" element={<CourseCataloguePage />} />
@@ -58,6 +69,7 @@ function AppRoutes() {
         <Route path="/assessments" element={<AssessmentsPage />} />
         <Route path="/analytics" element={<AdminRoute><AnalyticsPage /></AdminRoute>} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/competency-test" element={<LearnerRoute><CompetencyTestPage /></LearnerRoute>} />
       </Route>
 
       {/* Fallback */}

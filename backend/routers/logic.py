@@ -1,6 +1,5 @@
 """Shared business logic: skill-gap calculation, recommendations, MCQ generation."""
 
-import json
 import random
 import re
 from typing import List, Dict, Tuple
@@ -13,7 +12,7 @@ PRIORITY_COLORS = {"High": "red", "Medium": "amber", "Low": "blue", "No Gap": "g
 
 def get_role_requirements(cursor, role: str) -> List[Tuple[str, int]]:
     rows = cursor.execute(
-        "SELECT competency_id, level FROM role_requirements WHERE role = ?",
+        "SELECT competency_id, level FROM role_requirements WHERE role = %s",
         (role,),
     ).fetchall()
     return [(r["competency_id"], r["level"]) for r in rows]
@@ -39,7 +38,7 @@ def calculate_skill_gaps(cursor, current_scores: List[Dict], target_role: str) -
             priority = "No Gap"
 
         comp = cursor.execute(
-            "SELECT name, category, description FROM competencies WHERE id = ?",
+            "SELECT name, category, description FROM competencies WHERE id = %s",
             (cid,),
         ).fetchone()
         if not comp:
@@ -62,24 +61,25 @@ def get_recommended_courses(cursor, gaps: List[Dict]) -> List[Dict]:
     rows = cursor.execute("SELECT * FROM courses").fetchall()
     result = []
     for r in rows:
-        skills = json.loads(r["skills_covered"])
+        skills = r["skills_covered"] or []
         if any(s in high_skills for s in skills):
             result.append(row_to_course(r))
     return result
 
 
 def row_to_course(r) -> Dict:
-    try:
-        modules = json.loads(r["modules"]) if r["modules"] else []
-    except (json.JSONDecodeError, TypeError):
-        modules = []
+    # `modules` and `skills_covered` are jsonb, so psycopg already hands back
+    # real Python lists. Calling json.loads() on one raises TypeError, and the
+    # old try/except around it swallowed that into `modules = []` — every
+    # course silently rendered with no modules and no error.
+    modules = r["modules"] or []
     return {
         "id": r["id"],
         "courseCode": r["course_code"],
         "title": r["title"],
         "provider": r["provider"],
         "description": r["description"],
-        "skillsCovered": json.loads(r["skills_covered"]),
+        "skillsCovered": r["skills_covered"] or [],
         "difficulty": r["difficulty"],
         "duration": r["duration"],
         "language": r["language"],

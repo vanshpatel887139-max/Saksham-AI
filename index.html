@@ -2,12 +2,105 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>saksham-ai</title>
+    <title>SakshamAI — Skill Intelligence Platform</title>
+    <meta
+      name="description"
+      content="Skill Intelligence Platform for Official Statistics — skill up. step up."
+    />
+
+    <!-- Branding. The .ico is multi-resolution (16/32/48) so the tab strip and
+         the bookmarks bar both get a sharp mark instead of a downsampled blur. -->
+    <link rel="icon" type="image/x-icon" href="/branding/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/branding/favicon-192.png" />
+    <link rel="apple-touch-icon" href="/branding/favicon-192.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#1a2640" />
+
+    <!--
+      Boot splash.
+
+      AppContext does no async bootstrap - auth state is synchronous client
+      state - so there is no React component worth hanging a spinner on. What
+      there *is* to cover is the real gap before React exists: fetching and
+      evaluating the bundle. This markup is therefore static and inline, paints
+      on the first frame, and main.tsx removes it before the app renders. That
+      ordering matters - if React mounted first the splash would flash in front
+      of an already-painted app.
+
+      The timeout below is the failsafe. If the bundle 404s or throws during
+      evaluation, main.tsx never runs and would otherwise leave this on screen
+      forever, which is a worse outcome than an unstyled error.
+    -->
+    <style>
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.25rem;
+        background: #0d1320;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        animation: boot-fade 320ms ease-out;
+      }
+      #boot img {
+        /* 28px, matching the in-app header and sidebar. The splash was
+           oversizing the mark relative to the app it was loading. */
+        height: 28px;
+        width: auto;
+        /* display:block drops the inline-image baseline gap, so the mark sits
+           on the true optical centre of the splash rather than a few pixels
+           high, where the text under it would look misaligned. */
+        display: block;
+        animation: boot-pulse 1.8s ease-in-out infinite;
+      }
+      #boot p {
+        margin: 0;
+        color: #8da5c9;
+        font-size: 0.8125rem;
+        letter-spacing: 0.02em;
+      }
+      @keyframes boot-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50%      { opacity: 0.72; transform: scale(0.97); }
+      }
+      @keyframes boot-fade {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+      }
+      /* Honours the OS setting rather than pulsing regardless. A decorative
+         loop is exactly the kind of motion this should skip. */
+      @media (prefers-reduced-motion: reduce) {
+        #boot img { animation: none; }
+        #boot     { animation: none; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+
+    <div id="boot" role="status" aria-label="Loading SakshamAI">
+      <img src="/branding/logo.png" alt="" />
+      <p>skill up. step up.</p>
+    </div>
+
+    <noscript>
+      <style>#boot { display: none; }</style>
+      <p style="font-family: system-ui, sans-serif; padding: 2rem; text-align: center;">
+        SakshamAI needs JavaScript enabled to run.
+      </p>
+    </noscript>
+
+    <script>
+      // Failsafe for the splash, paired with the removal in main.tsx.
+      setTimeout(function () {
+        var b = document.getElementById('boot');
+        if (b) b.remove();
+      }, 6000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

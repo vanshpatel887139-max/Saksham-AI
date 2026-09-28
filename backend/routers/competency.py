@@ -1,6 +1,7 @@
 """Competency framework & skill-gap routes."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from auth_tokens import Identity, current_identity
 from database import get_db_connection
 from models import GapRequest
 from routers.logic import calculate_skill_gaps, get_recommended_courses
@@ -37,7 +38,7 @@ def role_requirements(role: str):
     try:
         rows = conn.execute(
             "SELECT rr.competency_id, rr.level, c.name, c.category "
-            "FROM role_requirements rr JOIN competencies c ON c.id = rr.competency_id WHERE rr.role = ?",
+            "FROM role_requirements rr JOIN competencies c ON c.id = rr.competency_id WHERE rr.role = %s",
             (role,),
         ).fetchall()
         return {
@@ -53,11 +54,13 @@ def role_requirements(role: str):
 
 
 @router.post("/assessment/gaps")
-def assess_gaps(req: GapRequest):
+def assess_gaps(req: GapRequest, identity: Identity = Depends(current_identity)):
     conn = get_db_connection()
     try:
-        gaps = calculate_skill_gaps(conn.cursor(), [c.model_dump() for c in req.competencies], req.role)
-        courses = get_recommended_courses(conn.cursor(), gaps)
+        # psycopg connections execute directly; there is no .cursor() to hand
+        # out, and logic.py only ever calls .execute() on what it is given.
+        gaps = calculate_skill_gaps(conn, [c.model_dump() for c in req.competencies], req.role)
+        courses = get_recommended_courses(conn, gaps)
         top_gaps = [g for g in gaps if g["priority"] in ("High", "Medium")][:3]
         return {
             "role": req.role,

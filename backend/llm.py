@@ -18,8 +18,36 @@ load_dotenv()
 
 GROQ_BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
-GROQ_TEMPERATURE = float(os.environ.get("GROQ_TEMPERATURE", "0.4"))
-GROQ_TIMEOUT = float(os.environ.get("GROQ_TIMEOUT", "60"))
+
+
+def _positive_float(name: str, default: float) -> float:
+    """Read a float from the environment, falling back on anything unusable.
+
+    These are evaluated at import time, and `main.py` imports this module, so a
+    bare `float(...)` here takes the whole application down: one typo in a
+    dashboard value ("60s", "1m", a stray space) raises ValueError while the
+    import chain is still running, and the process exits before it can serve
+    `/api/health` or report why. The AI features are an optional convenience
+    that already degrade to deterministic logic when unavailable, so a
+    malformed tuning knob should cost that and nothing more.
+
+    Mirrors `_positive_int` in database.py, which fails with the variable name
+    rather than letting int() explode inside a request handler.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    # 0 or negative is meaningless for both temperature and a timeout, and httpx
+    # rejects a non-positive timeout outright, so treat it as unset too.
+    return value if value > 0 else default
+
+
+GROQ_TEMPERATURE = _positive_float("GROQ_TEMPERATURE", 0.4)
+GROQ_TIMEOUT = _positive_float("GROQ_TIMEOUT", 60)
 
 
 class LLMUnavailableError(Exception):

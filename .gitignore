@@ -13,6 +13,9 @@ dist-ssr
 *.local
 .env
 .env.*
+# ...but the template is documentation and must be committed, otherwise
+# nobody can discover which variables are needed.
+!.env.example
 backend/.env
 backend/sakshamai.db
 

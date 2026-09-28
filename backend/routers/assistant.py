@@ -5,16 +5,33 @@ and the SakshamAI platform using a curated knowledge base built from the course
 catalogue and competency framework. Modular design leaves room for LLM integration.
 """
 
+import os
 import re
 
 import llm
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from auth_tokens import Identity, current_identity
 from database import get_db_connection
 from llm import LLMUnavailableError, llm_available, model_name
 from routers.logic import row_to_course
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
+
+
+def _share_profile() -> bool:
+    """Whether to include the officer's background in third-party LLM prompts.
+
+    Off by default. With it off, the advisor still receives the target role and
+    the full competency/learning snapshot, which is what actually produces the
+    advice; it just does not receive who the person is. Turn it on only if the
+    deployment has a DPA with the LLM provider that permits sending
+    background details to them. The officer's name is never sent either way.
+    """
+    return (os.environ.get("ADVISOR_SHARE_PROFILE") or "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
 
 
 class ChatRequest(BaseModel):
@@ -32,32 +49,32 @@ class ChatRequest(BaseModel):
 def _build_context(db, user_id: str) -> dict:
     """Live profile, competency snapshot, learning progress and matching courses
     to inject into the LLM prompt as a compact profile snapshot."""
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
     user = dict(user) if user else {}
 
-    target_role = user.get("current_role") or "Data Analyst"
+    target_role = user.get("target_role") or "Data Analyst"
     scores = {
         r["competency_id"]: r["level"]
         for r in db.execute(
-            "SELECT competency_id, level FROM competency_scores WHERE user_id = ?", (user_id,)
+            "SELECT competency_id, level FROM competency_scores WHERE user_id = %s", (user_id,)
         ).fetchall()
     }
     rows = db.execute(
-        "SELECT competency_id, level FROM role_requirements WHERE role = ?", (target_role,)
+        "SELECT competency_id, level FROM role_requirements WHERE role = %s", (target_role,)
     ).fetchall()
     gaps = []
     for r in rows:
         gap = max(0, r["level"] - scores.get(r["competency_id"], 0))
         if gap > 0:
             comp = db.execute(
-                "SELECT name FROM competencies WHERE id = ?", (r["competency_id"],)
+                "SELECT name FROM competencies WHERE id = %s", (r["competency_id"],)
             ).fetchone()
             gaps.append({"competency": comp["name"], "current": scores.get(r["competency_id"], 0), "required": r["level"], "gap": gap})
     top = sorted(gaps, key=lambda g: -g["gap"])[:5]
 
     comp_rows = db.execute(
         "SELECT c.id, c.name, c.category, s.level FROM competencies c "
-        "LEFT JOIN competency_scores s ON s.competency_id = c.id AND s.user_id = ? "
+        "LEFT JOIN competency_scores s ON s.competency_id = c.id AND s.user_id = %s "
         "ORDER BY c.category, c.name", (user_id,)
     ).fetchall()
     competency_list = [
@@ -68,18 +85,18 @@ def _build_context(db, user_id: str) -> dict:
 
     progress = []
     for e in db.execute(
-        "SELECT course_id, progress FROM course_enrollments WHERE user_id = ? ORDER BY enrolled_at DESC", (user_id,)
+        "SELECT course_id, progress FROM course_enrollments WHERE user_id = %s ORDER BY enrolled_at DESC", (user_id,)
     ).fetchall():
-        c = db.execute("SELECT title, course_code FROM courses WHERE id = ?", (e["course_id"],)).fetchone()
+        c = db.execute("SELECT title, course_code FROM courses WHERE id = %s", (e["course_id"],)).fetchone()
         if c:
             progress.append(f"{c['title']} ({c['course_code']}): {e['progress']}%")
     modules_done = db.execute(
-        "SELECT COUNT(*) AS n FROM module_progress WHERE user_id = ?", (user_id,)
+        "SELECT COUNT(*) AS n FROM module_progress WHERE user_id = %s", (user_id,)
     ).fetchone()["n"]
     recent_quizzes = [
         f"{q['title']} — {q['score']}/{q['total_questions']}"
         for q in db.execute(
-            "SELECT title, score, total_questions FROM quizzes WHERE user_id = ? ORDER BY date DESC, rowid DESC LIMIT 3", (user_id,)
+            "SELECT title, score, total_questions FROM quizzes WHERE user_id = %s ORDER BY created_at DESC LIMIT 3", (user_id,)
         ).fetchall()
     ]
 
@@ -127,14 +144,42 @@ def _llm_reply(db, req: ChatRequest) -> str:
     progress_txt = "\n".join(f"- {p}" for p in ctx["progress"]) or "- (no enrollments yet)"
     quizzes_txt = "; ".join(ctx["recent_quizzes"]) or "- (no quiz attempts yet)"
 
+    # Data minimisation for the third-party LLM call. Everything in `snapshot`
+    # leaves this server and is processed by Groq under their retention terms, so
+    # it is restricted to what the advisor genuinely reasons over: the role the
+    # officer is aiming at and the competency/learning data that drives the
+    # advice. See docs/PRIVACY.md for the full field-by-field justification.
+    #
+    # Never sent, at any setting:
+    #   name         - a direct identifier, used by the model only to choose a
+    #                  salutation. The prompt below asks for address by
+    #                  designation instead, which is equivalent in courtesy and
+    #                  identifies nobody.
+    #   email / auth_id / employee_id
+    #                - login identity and internal keys. Not needed to advise.
+    #
+    # Name and designation are substituted for the officer's actual identity so
+    # the model still addresses someone correctly. Department is withheld by
+    # default: in a small office department plus designation is often enough to
+    # single out one person, and nothing in the advice needs it.
+    share_profile = _share_profile()
+    officer = ctx["designation"] or "the officer"
+    if share_profile:
+        profile_line = (
+            f"OFFICER: {officer} | Department: {ctx['department'] or 'unknown'}\n"
+            f"BACKGROUND: Education: {ctx['education'] or 'n/a'} | "
+            f"Experience: {ctx['experience'] or 0} yrs | "
+            f"CAREER GOAL: {ctx['career_goal'] or 'not set'}"
+        )
+    else:
+        profile_line = f"OFFICER: {officer} (name withheld from the model)"
+
     snapshot = (
-        f"NAME: {ctx['name']} ({ctx['designation'] or 'designation not set'}, {ctx['department'] or 'department unknown'})\n"
-        f"PROFILE: Education: {ctx['education'] or 'n/a'} | Experience: {ctx['experience'] or 0} yrs | "
-        f"Preferred language: {ctx['language']}\n"
+        f"{profile_line}\n"
+        f"PREFERRED LANGUAGE: {ctx['language']}\n"
         f"TARGET ROLE: {ctx['target_role']} | Overall competency level (1-5): {ctx['overall_level']} "
         f"({ctx['modules_done']} modules completed)\n"
-        f"FULL COMPETENCY LEVELS: {competencies_txt}\n"
-        f"CAREER GOAL: {ctx['career_goal'] or 'not set'}"
+        f"FULL COMPETENCY LEVELS: {competencies_txt}"
     )
 
     system_prompt = (
@@ -152,7 +197,8 @@ def _llm_reply(db, req: ChatRequest) -> str:
         + progress_txt + "\n"
         "RECENT QUIZ RESULTS (last 3): " + quizzes_txt + "\n\n"
         "COMMUNICATION STANDARDS:\n"
-        "- Address the officer politely (e.g. 'Respected Madam/Sir' once at the start, then their designation or name).\n"
+        "- Address the officer politely (e.g. 'Respected Madam/Sir' once at the start, then their "
+        "designation). The officer's name is not provided to you; never guess, infer or invent it.\n"
         "- Answer directly first, ground every recommendation in the officer's own gaps and course codes above.\n"
         "- Be concise and structured: short bullets or a compact table. A table is fine only when it compares at most "
         "a handful of items and you are certain you can COMPLETE every row — never leave a table, bullet or "
@@ -185,7 +231,7 @@ def _kb_intro(req: ChatRequest = None) -> str:
         salute = "Respected Officer"
         ctx = None
         if req is not None:
-            user = db.execute("SELECT * FROM users WHERE id = ?", (req.user_id,)).fetchone()
+            user = db.execute("SELECT * FROM users WHERE id = %s", (req.user_id,)).fetchone()
             if user:
                 ctx = user
                 salute = f"Respected {user['name']}" + (f", {user['designation']}" if user["designation"] else "")
@@ -229,19 +275,19 @@ def _match_lead(message: str) -> bool:
 
 
 def _gap_response(db, user_id: str) -> str:
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
     if not user:
         return "I couldn't find your profile. Please log in again."
-    target_role = user["current_role"] or "Data Analyst"
+    target_role = user["target_role"] or "Data Analyst"
 
     scores = {
         r["competency_id"]: r["level"]
         for r in db.execute(
-            "SELECT competency_id, level FROM competency_scores WHERE user_id = ?", (user_id,)
+            "SELECT competency_id, level FROM competency_scores WHERE user_id = %s", (user_id,)
         ).fetchall()
     }
     rows = db.execute(
-        "SELECT competency_id, level FROM role_requirements WHERE role = ?", (target_role,)
+        "SELECT competency_id, level FROM role_requirements WHERE role = %s", (target_role,)
     ).fetchall()
 
     gaps = []
@@ -251,7 +297,7 @@ def _gap_response(db, user_id: str) -> str:
         gap = max(0, req - cur)
         if gap > 0:
             comp = db.execute(
-                "SELECT name FROM competencies WHERE id = ?", (r["competency_id"],)
+                "SELECT name FROM competencies WHERE id = %s", (r["competency_id"],)
             ).fetchone()
             gaps.append((comp["name"], cur, req, gap))
 
@@ -285,25 +331,25 @@ def _gap_response(db, user_id: str) -> str:
 
 
 def _plan_response(db, user_id: str, weeks: int = 2) -> str:
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
     if not user:
         return "I couldn't find your profile."
-    target_role = user["current_role"] or "Data Analyst"
+    target_role = user["target_role"] or "Data Analyst"
     scores = {
         r["competency_id"]: r["level"]
         for r in db.execute(
-            "SELECT competency_id, level FROM competency_scores WHERE user_id = ?", (user_id,)
+            "SELECT competency_id, level FROM competency_scores WHERE user_id = %s", (user_id,)
         ).fetchall()
     }
     rows = db.execute(
-        "SELECT competency_id, level FROM role_requirements WHERE role = ?", (target_role,)
+        "SELECT competency_id, level FROM role_requirements WHERE role = %s", (target_role,)
     ).fetchall()
     gaps = []
     for r in rows:
         gap = max(0, r["level"] - scores.get(r["competency_id"], 0))
         if gap > 0:
             comp = db.execute(
-                "SELECT name FROM competencies WHERE id = ?", (r["competency_id"],)
+                "SELECT name FROM competencies WHERE id = %s", (r["competency_id"],)
             ).fetchone()
             gaps.append((comp["name"], gap))
     top3 = sorted(gaps, key=lambda g: -g[1])[:3]
@@ -358,11 +404,11 @@ def _stat_response(message: str) -> str:
 def _lead_response(db, dept: str = "") -> str:
     if dept:
         peeps = db.execute(
-            "SELECT * FROM org_learners WHERE department = ?", (dept,)
+            "SELECT * FROM learner_directory WHERE department = %s", (dept,)
         ).fetchall()
     else:
         peeps = db.execute(
-            "SELECT * FROM org_learners WHERE status = 'Active' ORDER BY competency DESC LIMIT 5"
+            "SELECT * FROM learner_directory WHERE status = 'Active' ORDER BY competency DESC LIMIT 5"
         ).fetchall()
     if not peeps:
         return "I couldn't find colleagues in that department."
@@ -376,8 +422,8 @@ def _lead_response(db, dept: str = "") -> str:
 
 
 def _interview_response(db, user_id: str) -> str:
-    user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    target = (user["current_role"] if user else None) or "Statistical Investigator"
+    user = db.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
+    target = (user["target_role"] if user else None) or "Statistical Investigator"
     return (f"To prepare for a **{target}** interview, focus on:\n"
             "1. Key competencies for that role (see Skill Gap analysis)\n"
             "2. Core statistics concepts — sampling, surveys, CPI/WPI, national accounts\n"
@@ -386,28 +432,99 @@ def _interview_response(db, user_id: str) -> str:
             "the course modules on your Learning Path. Want me to create a study plan?")
 
 
+def _persist_exchange(user_id: str, question: str, answer: str) -> None:
+    """Append both halves of a turn to the transcript.
+
+    Best-effort: a chat reply must still reach the user if the history write
+    fails, so every error here is swallowed deliberately.
+    """
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "INSERT INTO advisor_messages (user_id, role, content) VALUES (%s, 'user', %s)",
+            (user_id, question),
+        )
+        conn.execute(
+            "INSERT INTO advisor_messages (user_id, role, content) VALUES (%s, 'assistant', %s)",
+            (user_id, answer),
+        )
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+
+@router.get("/history")
+def chat_history(identity: Identity = Depends(current_identity)):
+    """The caller's own transcript, oldest first.
+
+    Without this the conversation existed only in React state and vanished on
+    refresh, which is the one thing a "mentor" feature should not do.
+    """
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(
+            "SELECT role, content, created_at FROM advisor_messages "
+            "WHERE user_id = %s ORDER BY id",
+            (identity.id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "messages": [
+            {
+                "role": r["role"],
+                "content": r["content"],
+                "at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.delete("/history")
+def clear_chat_history(identity: Identity = Depends(current_identity)):
+    conn = get_db_connection()
+    try:
+        conn.execute("DELETE FROM advisor_messages WHERE user_id = %s", (identity.id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
 @router.post("/chat")
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, identity: Identity = Depends(current_identity)):
+    # Every downstream helper reads req.user_id to build the caller's personal
+    # context (their gaps, their courses, their quiz history). Overwriting it
+    # here is the single place that decides whose data the assistant sees.
+    req.user_id = identity.id
     message = (req.message or "").strip()
     if not message:
         return {"reply": _kb_intro(req), "exact": False, "source": "rule"}
 
+    result = None
     conn = get_db_connection()
     try:
         if llm_available():
             try:
-                return {
+                result = {
                     "reply": _llm_reply(conn, req),
                     "exact": True,
                     "source": "llm",
                     "model": model_name(),
                 }
             except LLMUnavailableError:
-                pass  # fall back to the keyword engine
+                result = None  # fall back to the keyword engine
     finally:
         conn.close()
 
-    return _rule_chat(req)
+    if result is None:
+        result = _rule_chat(req)
+
+    _persist_exchange(req.user_id, message, result.get("reply", ""))
+    return result
 
 
 def _rule_chat(req: ChatRequest):
@@ -428,7 +545,7 @@ def _rule_chat(req: ChatRequest):
         conn = get_db_connection()
         try:
             rows = conn.execute(
-                "SELECT competency_id, level FROM role_requirements WHERE role = (SELECT current_role FROM users WHERE id = ?)",
+                "SELECT competency_id, level FROM role_requirements WHERE role = (SELECT target_role FROM users WHERE id = %s)",
                 (req.user_id,),
             ).fetchall()
             gaps = []
@@ -436,7 +553,7 @@ def _rule_chat(req: ChatRequest):
                 gap = max(0, r["level"] - 2)
                 if gap > 0:
                     gaps.append({"competencyName": conn.execute(
-                        "SELECT name FROM competencies WHERE id = ?", (r["competency_id"],)
+                        "SELECT name FROM competencies WHERE id = %s", (r["competency_id"],)
                     ).fetchone()["name"], "priority": "High" if gap >= 3 else "Medium"})
             recs = get_recommended_courses(conn, gaps)
             lines = ["Here are the most relevant courses for your profile:"]

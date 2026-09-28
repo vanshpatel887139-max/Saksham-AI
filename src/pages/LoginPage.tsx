@@ -1,25 +1,64 @@
 import { useApp } from '../store/AppContext';
 import { useNavigate } from 'react-router-dom';
-import { Shield, BarChart3, Lock } from 'lucide-react';
-import { useState } from 'react';
+import { Shield, BarChart3, Lock, Users } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import Logo from '../components/Logo';
+import { apiGetDemoUsers, DemoAccount } from '../services/api';
+
+const DEMO_EMAIL = 'learner-1@sakshamai.demo';
 
 export default function LoginPage() {
   const { login } = useApp();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [accounts, setAccounts] = useState<DemoAccount[]>([]);
+  const [demoPassword, setDemoPassword] = useState<string | null>(null);
+  const [email, setEmail] = useState(DEMO_EMAIL);
+  const [password, setPassword] = useState('');
 
-  const handleLogin = async (role: 'learner' | 'admin') => {
+  useEffect(() => {
+    apiGetDemoUsers().then(({ users, demoPassword: pw }) => {
+      setAccounts(users);
+      setDemoPassword(pw);
+      if (users.length) setEmail(users[0].email);
+    }).catch(() => { /* offline: fall back to manual entry */ });
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!email || !password) {
+      setError('Enter your email and password.');
+      return;
+    }
     setLoading(true);
-    await login(role);
-    navigate('/dashboard');
+    try {
+      await login(email, password);
+      navigate('/dashboard');
+    } catch (err) {
+      // Never fall back to a mock user here — a failed sign-in must not look
+      // like a successful one.
+      setError(err instanceof Error ? err.message : 'Sign-in failed');
+      setLoading(false);
+    }
+  };
+
+  const pick = (a: DemoAccount) => {
+    setEmail(a.email);
+    if (demoPassword) setPassword(demoPassword);
+    setError('');
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-navy-800 via-navy-900 to-navy-800 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-saffron-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-2xl font-bold text-white">S</span>
+          {/* The only placement that asks for the full lockup. mb-4 is block
+              rhythm to the h1 below, not alignment -- the mark is centred by
+              justify-center, and there is no sibling text to align to. */}
+          <div className="flex justify-center mb-4">
+            <Logo variant="full" height={72} />
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">SakshamAI</h1>
           <p className="text-navy-300 text-sm">Skill Intelligence Platform for Official Statistics</p>
@@ -28,44 +67,105 @@ export default function LoginPage() {
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <h2 className="text-xl font-semibold text-navy-800 text-center mb-6">Sign In to Your Account</h2>
 
-          <div className="space-y-4">
-            <button
-              onClick={() => handleLogin('learner')}
-              disabled={loading}
-              className="w-full flex items-center gap-4 p-4 border-2 border-navy-100 rounded-xl hover:border-saffron-400 hover:bg-saffron-50 transition-all duration-200 group cursor-pointer disabled:opacity-50 disabled:cursor-wait"
-            >
-              <div className="w-12 h-12 bg-navy-100 group-hover:bg-saffron-500 rounded-xl flex items-center justify-center transition-colors">
-                {loading
-                  ? <span className="w-5 h-5 border-2 border-saffron-400 border-t-white rounded-full animate-spin" />
-                  : <BarChart3 className="text-navy-600 group-hover:text-white" size={24} />}
+          {accounts.length > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center gap-2 text-xs font-medium text-navy-500 uppercase tracking-wide mb-3">
+                <Users size={14} />
+                <span>Demo accounts</span>
               </div>
-              <div className="text-left">
-                <p className="font-semibold text-navy-800">{loading ? 'Signing in…' : 'Login as Learner'}</p>
-                <p className="text-xs text-navy-400">Access courses, assessments & learning paths</p>
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {accounts.map(a => {
+                  const active = email === a.email;
+                  const Icon = a.role === 'admin' ? Shield : BarChart3;
+                  return (
+                    <button
+                      key={a.userId}
+                      type="button"
+                      onClick={() => pick(a)}
+                      disabled={loading}
+                      className={`w-full flex items-center gap-3 p-3 border-2 rounded-xl text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-wait ${
+                        active
+                          ? 'border-saffron-400 bg-saffron-50'
+                          : 'border-navy-100 hover:border-saffron-400 hover:bg-saffron-50'
+                      }`}
+                    >
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${active ? 'bg-saffron-500' : 'bg-navy-100'}`}>
+                        <Icon className={active ? 'text-white' : 'text-navy-600'} size={18} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-navy-800 text-sm truncate">{a.name}</p>
+                        <p className="text-xs text-navy-400 truncate">{a.designation || a.department}</p>
+                      </div>
+                      {a.role === 'admin' && (
+                        <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 bg-navy-100 text-navy-600 rounded shrink-0">
+                          ADMIN
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
-            </button>
+              {demoPassword && (
+                <p className="mt-3 text-xs text-navy-400">
+                  Demo password: <code className="font-mono text-navy-600">{demoPassword}</code>
+                </p>
+              )}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-navy-700 mb-1.5">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="w-full px-3 py-2.5 border-2 border-navy-100 rounded-xl focus:border-saffron-400 focus:outline-none transition-colors text-navy-800"
+                placeholder="you@sakshamai.demo"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-navy-700 mb-1.5">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                className="w-full px-3 py-2.5 border-2 border-navy-100 rounded-xl focus:border-saffron-400 focus:outline-none transition-colors text-navy-800"
+                placeholder="••••••••"
+              />
+            </div>
+
+            {error && (
+              <p role="alert" className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </p>
+            )}
 
             <button
-              onClick={() => handleLogin('admin')}
+              type="submit"
               disabled={loading}
-              className="w-full flex items-center gap-4 p-4 border-2 border-navy-100 rounded-xl hover:border-navy-600 hover:bg-navy-50 transition-all duration-200 group cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+              className="w-full flex items-center justify-center gap-3 p-3.5 bg-saffron-500 hover:bg-saffron-600 rounded-xl text-white font-semibold transition-colors duration-200 disabled:opacity-50 disabled:cursor-wait"
             >
-              <div className="w-12 h-12 bg-navy-100 group-hover:bg-navy-600 rounded-xl flex items-center justify-center transition-colors">
-                {loading
-                  ? <span className="w-5 h-5 border-2 border-navy-400 border-t-white rounded-full animate-spin" />
-                  : <Shield className="text-navy-600 group-hover:text-white" size={24} />}
-              </div>
-              <div className="text-left">
-                <p className="font-semibold text-navy-800">{loading ? 'Signing in…' : 'Login as Administrator'}</p>
-                <p className="text-xs text-navy-400">View org analytics, manage learners & courses</p>
-              </div>
+              {loading
+                ? <span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                : <Lock size={18} />}
+              {loading ? 'Signing in…' : 'Sign In'}
             </button>
-          </div>
+          </form>
 
           <div className="mt-6 pt-4 border-t border-navy-100">
             <div className="flex items-center gap-2 justify-center text-xs text-navy-400">
               <Lock size={12} />
-              <span>Demo Mode – Authentication Simulated</span>
+              <span>Credentials verified by Supabase Auth when a server is connected</span>
             </div>
           </div>
         </div>

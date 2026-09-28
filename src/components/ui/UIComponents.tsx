@@ -188,3 +188,35 @@ export function EmptyState({ icon, title, description }: EmptyStateProps) {
     </div>
   );
 }
+
+interface ModalProps {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  children: ReactNode;
+  maxWidth?: string;
+  className?: string;
+}
+
+export function Modal({ open, onClose, title, children, maxWidth = 'max-w-4xl', className = '' }: ModalProps) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+      <div className={`w-full ${maxWidth} rounded-2xl bg-white shadow-xl ${className}`}>
+        {title && (
+          <div className="flex items-center justify-between border-b border-navy-100 px-6 py-4">
+            <h3 className="text-base font-semibold text-navy-900">{title}</h3>
+            <button
+              onClick={onClose}
+              className="rounded-full p-1 text-navy-400 transition hover:bg-navy-50 hover:text-navy-600"
+              aria-label="Close modal"
+            >
+              ×
+            </button>
+          </div>
+        )}
+        <div className="p-6">{children}</div>
+      </div>
+    </div>
+  );
+}

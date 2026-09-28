@@ -4,11 +4,18 @@ Simulates the mock iGOT Karmayogi + NSSTA APIs. Completing a course module bumps
 linked competencies on the learner profile, which re-runs gap analysis automatically.
 """
 
-import json
 import time
 import uuid
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from auth_tokens import (
+    Identity,
+    current_identity,
+    optional_identity,
+    require_self_or_admin,
+)
 from database import get_db_connection
 from models import EnrollRequest
 from routers.logic import row_to_course
@@ -16,15 +23,32 @@ from routers.logic import row_to_course
 router = APIRouter(prefix="/api", tags=["courses"])
 
 
+def _assert_may_read(user_id: str, identity: Optional[Identity]) -> None:
+    """Enforce self-or-admin for a user-scoped read on a public endpoint."""
+    if identity is None:
+        raise HTTPException(
+            status_code=401, detail="Sign in to view per-user course progress"
+        )
+    require_self_or_admin(user_id, identity)
+
+
 @router.get("/courses")
-def list_courses(user_id: str = ""):
+def list_courses(
+    user_id: str = "", identity: Optional[Identity] = Depends(optional_identity)
+):
+    # The catalogue itself stays public so a signed-out landing page can render
+    # it, but the optional per-user progress does not: without this check
+    # anyone could pass ?user_id=admin-1 and read the administrator's
+    # enrolments.
+    if user_id:
+        _assert_may_read(user_id, identity)
     conn = get_db_connection()
     try:
         rows = conn.execute("SELECT * FROM courses").fetchall()
         enrolled = {}
         if user_id:
             rows_e = conn.execute(
-                "SELECT course_id, progress FROM course_enrollments WHERE user_id = ?",
+                "SELECT course_id, progress FROM course_enrollments WHERE user_id = %s",
                 (user_id,),
             ).fetchall()
             enrolled = {r["course_id"]: r["progress"] for r in rows_e}
@@ -42,26 +66,40 @@ def list_courses(user_id: str = ""):
 
 
 @router.get("/courses/{course_id}")
-def course_detail(course_id: str, user_id: str = ""):
+def course_detail(
+    course_id: str,
+    user_id: str = "",
+    identity: Optional[Identity] = Depends(optional_identity),
+):
+    if user_id:
+        _assert_may_read(user_id, identity)
     conn = get_db_connection()
     try:
-        row = conn.execute("SELECT * FROM courses WHERE id = ?", (course_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM courses WHERE id = %s OR course_code = %s",
+            (course_id, course_id),
+        ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Course not found")
         course = row_to_course(row)
+        # Progress and enrolment are keyed on the primary key, not the code the
+        # caller may have used, so they are looked up with the resolved id.
+        # Passing the raw course_id here made a code-addressed request silently
+        # report zero progress and unenrolled, which reads as data loss.
+        resolved_id = row["id"]
         if user_id:
             completed = {
                 r["module_title"]
                 for r in conn.execute(
-                    "SELECT module_title FROM module_progress WHERE user_id = ? AND course_id = ?",
-                    (user_id, course_id),
+                    "SELECT module_title FROM module_progress WHERE user_id = %s AND course_id = %s",
+                    (user_id, resolved_id),
                 ).fetchall()
             }
             for m in course.get("modules", []):
                 m["completed"] = m["title"] in completed
             e = conn.execute(
-                "SELECT progress FROM course_enrollments WHERE user_id = ? AND course_id = ?",
-                (user_id, course_id),
+                "SELECT progress FROM course_enrollments WHERE user_id = %s AND course_id = %s",
+                (user_id, resolved_id),
             ).fetchone()
             if e:
                 course["enrolled"] = True
@@ -72,22 +110,31 @@ def course_detail(course_id: str, user_id: str = ""):
 
 
 @router.post("/courses/enroll")
-def enroll(req: EnrollRequest):
+def enroll(req: EnrollRequest, identity: Identity = Depends(current_identity)):
+    # The write below uses `identity.id`, never the body, so a caller cannot
+    # enrol somebody else. The field is still checked rather than silently
+    # ignored, so a client that sends the wrong id gets told rather than
+    # quietly succeeding against the wrong record.
+    require_self_or_admin(req.user_id, identity)
     conn = get_db_connection()
     try:
-        user = conn.execute("SELECT id FROM users WHERE id = ?", (req.user_id,)).fetchone()
-        course = conn.execute("SELECT id FROM courses WHERE id = ?", (req.course_id,)).fetchone()
+        user = conn.execute("SELECT id FROM users WHERE id = %s", (identity.id,)).fetchone()
+        course = conn.execute(
+            "SELECT id FROM courses WHERE id = %s OR course_code = %s",
+            (req.course_id, req.course_id),
+        ).fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         if not course:
             raise HTTPException(status_code=404, detail="Course not found")
 
         conn.execute(
-            "INSERT OR IGNORE INTO course_enrollments (user_id, course_id, progress) VALUES (?, ?, 0)",
-            (req.user_id, req.course_id),
+            "INSERT INTO course_enrollments (user_id, course_id, progress) VALUES (%s, %s, 0) "
+            "ON CONFLICT (user_id, course_id) DO NOTHING",
+            (identity.id, req.course_id),
         )
         conn.commit()
-        return {"ok": True, "courseId": req.course_id, "user_id": req.user_id}
+        return {"ok": True, "courseId": req.course_id, "user_id": identity.id}
     finally:
         conn.close()
 
@@ -100,19 +147,23 @@ class ModuleCompleteRequest(BaseModel):
 
 
 @router.post("/courses/module-complete")
-def complete_module(req: ModuleCompleteRequest):
+def complete_module(
+    req: ModuleCompleteRequest, identity: Identity = Depends(current_identity)
+):
     """Mark a module complete; for quiz-type modules, use the assessment score.
 
     When all modules are done, bumps each linked competency by +1 (max 5),
     updates enrollment progress and logs activity + notification.
     """
+    require_self_or_admin(req.user_id, identity)
     conn = get_db_connection()
     try:
-        user = conn.execute("SELECT id FROM users WHERE id = ?", (req.user_id,)).fetchone()
+        user = conn.execute("SELECT id FROM users WHERE id = %s", (identity.id,)).fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         course_row = conn.execute(
-            "SELECT * FROM courses WHERE id = ?", (req.course_id,)
+            "SELECT * FROM courses WHERE id = %s OR course_code = %s",
+            (req.course_id, req.course_id),
         ).fetchone()
         if not course_row:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -128,15 +179,16 @@ def complete_module(req: ModuleCompleteRequest):
 
         # Record module completion
         conn.execute(
-            "INSERT OR IGNORE INTO module_progress (user_id, course_id, module_title, completed_at) VALUES (?, ?, ?, ?)",
-            (req.user_id, req.course_id, req.module_title, time.strftime("%Y-%m-%d")),
+            "INSERT INTO module_progress (user_id, course_id, module_title, completed_at) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+            (identity.id, req.course_id, req.module_title, time.strftime("%Y-%m-%d")),
         )
 
         completed_titles = {
             r["module_title"]
             for r in conn.execute(
-                "SELECT module_title FROM module_progress WHERE user_id = ? AND course_id = ?",
-                (req.user_id, req.course_id),
+                "SELECT module_title FROM module_progress WHERE user_id = %s AND course_id = %s",
+                (identity.id, req.course_id),
             ).fetchall()
         }
         course_complete = all(m["title"] in completed_titles for m in modules)
@@ -145,32 +197,37 @@ def complete_module(req: ModuleCompleteRequest):
         total_mods = max(len(modules), 1)
         progress = int((len(completed_titles) / total_mods) * 100)
         conn.execute(
-            "UPDATE course_enrollments SET progress = ? WHERE user_id = ? AND course_id = ?",
-            (progress, req.user_id, req.course_id),
+            "UPDATE course_enrollments SET progress = %s WHERE user_id = %s AND course_id = %s",
+            (progress, identity.id, req.course_id),
         )
 
         bumped = []
         if course_complete:
-            try:
-                skills = json.loads(course_row["skills_covered"])
-            except (json.JSONDecodeError, TypeError):
-                skills = []
+            # jsonb: psycopg already returns a list, so json.loads() would
+            # raise TypeError and the old except turned that into skills = []
+            # — a "completed" course that silently credited no competencies.
+            skills = course_row["skills_covered"] or []
             for skill_name in skills:
                 comp = conn.execute(
-                    "SELECT * FROM competencies WHERE name = ?", (skill_name,)
+                    "SELECT * FROM competencies WHERE name = %s", (skill_name,)
                 ).fetchone()
                 if not comp:
                     continue
                 comp_id = comp["id"]
                 score_row = conn.execute(
-                    "SELECT level FROM competency_scores WHERE user_id = ? AND competency_id = ?",
-                    (req.user_id, comp_id),
+                    "SELECT level FROM competency_scores WHERE user_id = %s AND competency_id = %s",
+                    (identity.id, comp_id),
                 ).fetchone()
                 current = score_row["level"] if score_row else 2
                 nxt = min(current + 1, 5)
+                # Upsert the level only. INSERT OR REPLACE is a DELETE+INSERT,
+                # which would reset source/accuracy/self_rated_level/tested_at
+                # to their defaults and silently erase the learner's test
+                # provenance the moment they completed a course.
                 conn.execute(
-                    "INSERT OR REPLACE INTO competency_scores (user_id, competency_id, level) VALUES (?, ?, ?)",
-                    (req.user_id, comp_id, nxt),
+                    "INSERT INTO competency_scores (user_id, competency_id, level) VALUES (%s, %s, %s) "
+                    "ON CONFLICT(user_id, competency_id) DO UPDATE SET level = excluded.level",
+                    (identity.id, comp_id, nxt),
                 )
                 if nxt > current:
                     bumped.append({
@@ -179,12 +236,20 @@ def complete_module(req: ModuleCompleteRequest):
                         "before": current,
                         "after": nxt,
                     })
+                    # Audit trail: distinguishes a level earned by finishing a
+                    # course from one earned by passing the competency test.
+                    conn.execute(
+                        "INSERT INTO score_update_log "
+                        "(user_id, competency_id, previous_level, new_level, source, reference_id) "
+                        "VALUES (%s, %s, %s, %s, 'course', %s)",
+                        (identity.id, comp_id, current, nxt, req.course_id),
+                    )
 
             conn.execute(
-                "INSERT INTO activities (id, user_id, action, detail, date, icon) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO activities (id, user_id, action, detail, date, icon) VALUES (%s, %s, %s, %s, %s, %s)",
                 (
                     f"act-{uuid.uuid4().hex[:8]}",
-                    req.user_id,
+                    identity.id,
                     "Completed Course",
                     f"{course['title']} - all modules completed",
                     time.strftime("%Y-%m-%d"),
@@ -193,10 +258,10 @@ def complete_module(req: ModuleCompleteRequest):
             )
             if bumped:
                 conn.execute(
-                    "INSERT INTO notifications (id, user_id, message, type, date, is_read) VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO notifications (id, user_id, message, type, date, is_read) VALUES (%s, %s, %s, %s, %s, %s)",
                     (
                         f"ntr-{uuid.uuid4().hex[:8]}",
-                        req.user_id,
+                        identity.id,
                         "Skill improved! " + ", ".join(
                             f"{b['name']}: Level {b['before']} → {b['after']}" for b in bumped
                         ),
@@ -210,10 +275,10 @@ def complete_module(req: ModuleCompleteRequest):
         if is_quiz:
             quiz_id = f"quiz-{uuid.uuid4().hex[:8]}"
             conn.execute(
-                "INSERT INTO quizzes (id, user_id, title, date, score, total_questions) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO quizzes (id, user_id, title, date, score, total_questions) VALUES (%s, %s, %s, %s, %s, %s)",
                 (
                     quiz_id,
-                    req.user_id,
+                    identity.id,
                     f"{course['title']} - {req.module_title}",
                     time.strftime("%Y-%m-%d"),
                     req.assessment_score,

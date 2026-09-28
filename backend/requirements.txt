@@ -7,3 +7,16 @@ python-docx==1.2.0
 python-pptx==1.0.2
 httpx==0.28.1
 python-dotenv==1.0.1
+# psycopg-pool is pinned SEPARATELY on purpose. The `pool` extra of
+# psycopg[binary,pool] does not constrain psycopg-pool's own version, so it
+# floats silently. This pin is NOT what fixes the outage below -- it just stops
+# an unpinned transitive dependency from changing under us.
+#
+# The real fix is database._PooledConnection. In BOTH 3.2.3 and 3.3.3,
+# ConnectionPool.getconn() returns a plain psycopg.Connection; calling .close()
+# on it closes the socket without returning the connection to the pool, so the
+# slot leaks. Every router here uses conn.close() in a finally, so the pool
+# filled to DB_POOL_MAX and then every request failed with PoolTimeout. Do not
+# "simplify" the adapter back to a raw getconn().
+psycopg[binary]==3.2.3
+psycopg-pool>=3.2,<4

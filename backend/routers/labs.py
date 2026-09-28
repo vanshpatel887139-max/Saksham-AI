@@ -4,6 +4,19 @@ Run endpoint: compiles user code first (real SyntaxError reporting), then
 executes it in a lightweight sandboxed subprocess with CPU/memory/file limits
 and a timeout. DEMO-ONLY sandbox — not hardened for production use; do not run
 this against untrusted code in a shared environment without stronger isolation.
+
+SECURITY. This route is remote code execution by design, so it is treated as
+the most dangerous endpoint in the app. Three things were verified about the
+subprocess sandbox: it can read any file the server can read (so `backend/.env`,
+including SUPABASE_SERVICE_ROLE_KEY and the database password), it inherits the
+server's environment variables, and it has unrestricted outbound network access
+to exfiltrate them. RLIMIT_CPU / RLIMIT_AS / RLIMIT_NOFILE stop neither. A
+timeout is not a sandbox.
+
+Therefore POST /run requires a signed-in user, and it is refused outright once
+a real Supabase backend is configured, unless ALLOW_CODE_EXECUTION is
+explicitly set. That default is the safe direction: pointing the app at a real
+database is the signal that it is no longer a laptop demo.
 """
 
 import json
@@ -14,15 +27,36 @@ import sys
 import tempfile
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from auth_tokens import Identity, current_identity
 from database import get_db_connection
 
 router = APIRouter(prefix="/api/labs", tags=["labs"])
 
 MAX_CODE_LEN = 8000
 RUN_TIMEOUT = 5  # seconds
+
+
+def _flag(name: str) -> bool:
+    """Read a boolean env var, defaulting to off. Fails closed on typos."""
+    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _code_execution_enabled() -> bool:
+    """Is running caller-supplied Python allowed right now?
+
+    On by default only while there is no real backend configured — i.e. the
+    laptop demo. As soon as SUPABASE_URL is set the app is pointed at real
+    infrastructure holding real credentials, so execution is off unless someone
+    has deliberately turned it back on.
+    """
+    if _flag("ALLOW_CODE_EXECUTION"):
+        return True
+    if _flag("DISABLE_CODE_EXECUTION"):
+        return False
+    return not (os.environ.get("SUPABASE_URL") or "").strip()
 
 
 class PythonRunRequest(BaseModel):
@@ -73,7 +107,20 @@ def _format_syntax_error(e: SyntaxError, code: str) -> str:
 
 
 @router.post("/run")
-def run_python(req: PythonRunRequest):
+def run_python(
+    req: PythonRunRequest,
+    identity: Identity = Depends(current_identity),
+):
+    if not _code_execution_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Code execution is disabled on this deployment. It runs "
+                "caller-supplied Python without real isolation, so it is only "
+                "available in local demo mode."
+            ),
+        )
+
     code = (req.code or "").strip()
     if not code:
         return {"ok": False, "output": "", "error": "No code provided", "durationMs": 0}
