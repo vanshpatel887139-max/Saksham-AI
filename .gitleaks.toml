@@ -152,6 +152,19 @@ description = "Known-public demo credential, matched on the value alone"
 regexes = ['''Demo@1234''']
 
 [[allowlists]]
+description = '''Supabase session-pooler *template* quoted in deploy_config's DATABASE_URL
+help text. REF / PASSWORD / REGION are placeholders from Supabase's own documentation
+format; the USER is literally `postgres.REF` and the password literally `PASSWORD`, so
+this can never be a real credential. Value-only, same philosophy as the Demo@1234 entry.'''
+regexes = ['''postgresql://postgres\.REF:PASSWORD@[^\s]+\.pooler\.supabase\.com''']
+
+[[allowlists]]
+description = '''Synthetic dummy DSNs used only as TLS-check fixtures in check_deploy.py
+(`_check_database_tls` tests) — the user is `u`, the password `p`, the host `h`: an
+abbreviation, not a credential. Value-only; a real deployment string never begins `u:p@h`.'''
+regexes = ['''postgresql://u:p@h(?:[?/:]|$)''']
+
+[[allowlists]]
 description = "Tracked template of placeholders, not real values"
 paths = ['''^\.env\.example$''']
 
