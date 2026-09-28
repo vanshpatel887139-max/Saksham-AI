@@ -237,7 +237,7 @@ Two deliberate exclusions from "move it to an env var":
 - **The anon key is not a browser value here.** It is only safe client-side
   *with RLS on every table*, and this app talks to Postgres directly, so the
   frontend never needs it. It is verified server-side and never shipped.
-  RLS is on for all 16 public tables, so a leaked anon key would still be
+  RLS is on for all 18 public tables, so a leaked anon key would still be
   inert.
 - **`Demo@1234` stays a literal.** Vite inlines `VITE_*` into the same bundle,
   so an env var would hide it from grep without removing it from view-source.
@@ -245,18 +245,20 @@ Two deliberate exclusions from "move it to an env var":
 
 ## Git History
 
-**No secret has ever been committed to this repository.** Both commits
-(`71e33f7`, `8248885`) are pre-Supabase, and every blob in every revision was
-scanned for JWTs, Stripe/Groq/OpenAI/AWS/GitHub/Slack/SendGrid keys, `sb_`
-keys, connection strings with inline passwords, and PEM private keys — zero
-hits. No `.env` has ever been added to the index, and gitleaks reports
-`no leaks found` against `--log-opts="--all"`.
+**No secret has ever been committed to this repository.** All five commits on
+`main` (`71e33f7`, `8248885`, `effa84a`, `2f99272`, `f97e3ef`) were scanned —
+every blob in every revision — for JWTs, Stripe/Groq/OpenAI/AWS/GitHub/
+Slack/SendGrid keys, `sb_` keys, connection strings with inline passwords, and
+PEM private keys: zero hits outside the documented allowlist. No `.env` (the
+gitignored file, as opposed to `.env.example` placeholders) has ever been added
+to the index, and gitleaks reports `no leaks found` against
+`--log-opts="--all"`.
 
-So there is **nothing to rotate today.** That changes the moment the working
-tree is first committed: `Demo@1234` enters history permanently. It is a demo
-credential, so this only matters if you later give it real value — at which
-point rotate the demo password and the Supabase service_role key, and rewrite
-history (`git filter-repo`, then force-push and have everyone re-clone).
+So there is **nothing to rotate today.** `Demo@1234` is permanently in history
+(it shipped with the platform code), but it is a demo credential with no real
+value. That only changes if you later give it value — at which point rotate the
+demo password and the Supabase service_role key, and rewrite history
+(`git filter-repo`, then force-push and have everyone re-clone).
 
 **If you ever add a real key, rotate it the moment it is committed.** A key that
 reached a remote is compromised regardless of whether it is later deleted: forks,
