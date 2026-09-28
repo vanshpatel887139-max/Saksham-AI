@@ -179,6 +179,12 @@ def generate_quiz(
     req: QuizGenerateRequest, identity: Identity = Depends(current_identity)
 ):
     """LLM-assisted MCQ generation (falls back to deterministic logic)."""
+    if (rate_limit.llm_budget_remaining(f"llm:{identity.id}") or 0) < 0:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily AI generation limit reached. Try again tomorrow.",
+            headers={"Retry-After": "86400"},
+        )
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="No text provided")
     result = _generate(req.text, req.count, req.difficulty)
@@ -198,6 +204,12 @@ async def generate_from_file(
     difficulty: str = Form("Medium"),
 ):
     """Generate a quiz from an uploaded learning material (real text extraction)."""
+    if (rate_limit.llm_budget_remaining(f"llm:{identity.id}") or 0) < 0:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily AI generation limit reached. Try again tomorrow.",
+            headers={"Retry-After": "86400"},
+        )
     data = await _read_capped(file, _upload_limit())
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")

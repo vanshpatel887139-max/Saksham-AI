@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from psycopg.types.json import Json
 
 from fastapi import APIRouter, Depends, HTTPException
+import rate_limit
 
 from auth_tokens import Identity, current_identity
 from database import get_db_connection
@@ -473,6 +474,12 @@ def generate_test(
 ):
     # Authenticated because this calls an LLM: leaving it open would let anyone
     # spend the project's API budget through your deployment.
+    if (rate_limit.llm_budget_remaining(f"llm:{identity.id}") or 0) < 0:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily AI generation limit reached. Try again tomorrow.",
+            headers={"Retry-After": "86400"},
+        )
     if not req.competencyIds:
         raise HTTPException(status_code=400, detail="competencyIds must not be empty")
 

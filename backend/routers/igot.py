@@ -7,7 +7,8 @@ same database rows so the feature always works.
 """
 
 import json
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+import rate_limit
 from pydantic import BaseModel
 
 from auth_tokens import Identity, current_identity
@@ -185,6 +186,12 @@ def generate_plan(req: PlanRequest, identity: Identity = Depends(current_identit
     # The plan is built from the caller's real competency gaps, so the caller
     # must not be able to name somebody else and read their gap analysis.
     req.user_id = identity.id
+    if (rate_limit.llm_budget_remaining(f"llm:{identity.id}") or 0) < 0:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily AI generation limit reached. Try again tomorrow.",
+            headers={"Retry-After": "86400"},
+        )
     weeks = max(1, min(int(req.weeks or DEFAULT_WEEKS), MAX_WEEKS))
     db = get_db_connection()
     try:

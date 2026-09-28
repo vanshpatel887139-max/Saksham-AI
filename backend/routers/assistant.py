@@ -9,7 +9,8 @@ import os
 import re
 
 import llm
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+import rate_limit
 from pydantic import BaseModel
 from auth_tokens import Identity, current_identity
 from database import get_db_connection
@@ -500,6 +501,12 @@ def chat(req: ChatRequest, identity: Identity = Depends(current_identity)):
     # context (their gaps, their courses, their quiz history). Overwriting it
     # here is the single place that decides whose data the assistant sees.
     req.user_id = identity.id
+    if (rate_limit.llm_budget_remaining(f"llm:{identity.id}") or 0) < 0:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily AI generation limit reached. Try again tomorrow.",
+            headers={"Retry-After": "86400"},
+        )
     message = (req.message or "").strip()
     if not message:
         return {"reply": _kb_intro(req), "exact": False, "source": "rule"}

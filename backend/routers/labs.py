@@ -142,6 +142,12 @@ def run_python(
     req: PythonRunRequest,
     identity: Identity = Depends(current_identity),
 ):
+    if (rate_limit.llm_budget_remaining(f"llm:{identity.id}") or 0) < 0:
+        raise HTTPException(
+            status_code=429,
+            detail="Daily AI generation limit reached. Try again tomorrow.",
+            headers={"Retry-After": "86400"},
+        )
     if not _code_execution_enabled():
         raise HTTPException(
             status_code=503,

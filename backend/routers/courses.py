@@ -9,7 +9,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from auth_tokens import (
     Identity,
     current_identity,
@@ -143,7 +143,12 @@ class ModuleCompleteRequest(BaseModel):
     user_id: str
     course_id: str
     module_title: str
-    assessment_score: int = 0
+    assessment_score: int = Field(
+        default=0,
+        ge=0,
+        le=5,
+        description="Quiz-module score, clamped to the 5 questions a module quiz holds.",
+    )
 
 
 @router.post("/courses/module-complete")
@@ -154,6 +159,12 @@ def complete_module(
 
     When all modules are done, bumps each linked competency by +1 (max 5),
     updates enrollment progress and logs activity + notification.
+
+    Side effects (quiz attempt, competency bump, activity, notification) run
+    only on the *first* completion of a module: module_progress has a primary
+    key of (user_id, course_id, module_title), so the progress upsert is
+    idempotent, and replaying the request must not re-insert a fabricated quiz
+    attempt, re-bump a competency, or spam the feed.
     """
     require_self_or_admin(req.user_id, identity)
     conn = get_db_connection()
@@ -177,12 +188,16 @@ def complete_module(
         module = matching[0]
         is_quiz = module.get("type") == "quiz"
 
-        # Record module completion
-        conn.execute(
+        # Record module completion. The PK is (user_id, course_id,
+        # module_title), so this is idempotent; rowcount tells us whether this
+        # call is the *first* completion, which is the only time side effects
+        # below may fire.
+        cur = conn.execute(
             "INSERT INTO module_progress (user_id, course_id, module_title, completed_at) "
             "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
             (identity.id, req.course_id, req.module_title, time.strftime("%Y-%m-%d")),
         )
+        new_completion = cur.rowcount == 1
 
         completed_titles = {
             r["module_title"]
@@ -202,7 +217,7 @@ def complete_module(
         )
 
         bumped = []
-        if course_complete:
+        if course_complete and new_completion:
             # jsonb: psycopg already returns a list, so json.loads() would
             # raise TypeError and the old except turned that into skills = []
             # — a "completed" course that silently credited no competencies.
@@ -267,12 +282,14 @@ def complete_module(
                         ),
                         "success",
                         time.strftime("%Y-%m-%d"),
-                        0,
+                        False,
                     ),
                 )
 
-        # If module was a quiz, also record the quiz attempt
-        if is_quiz:
+        # If module was a quiz, also record the quiz attempt — once, on the
+        # first completion only (replay would keep punching fabricated
+        # attempts into quiz history).
+        if is_quiz and new_completion:
             quiz_id = f"quiz-{uuid.uuid4().hex[:8]}"
             conn.execute(
                 "INSERT INTO quizzes (id, user_id, title, date, score, total_questions) VALUES (%s, %s, %s, %s, %s, %s)",

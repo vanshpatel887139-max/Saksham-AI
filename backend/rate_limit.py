@@ -176,3 +176,47 @@ def reset() -> None:
     """Clear all counters. For tests."""
     with _lock:
         _attempts.clear()
+        _LLM_BUDGET.clear()
+
+
+# ---------------------------------------------------------------------------
+# Per-user daily budget for LLM-costly generative routes.
+#
+# The credential scopes above bound *guessing*; they say nothing about a
+# logged-in learner who scripts thousands of generative calls a day. Each one
+# burns Groq tokens and writes rows (transcripts, quiz attempts, plans), so a
+# cheap route is a cheap way to run the bill up. This scope caps that.
+#
+# Why a UTC-day fixed window instead of a sliding one: the point is a hard cap
+# that an operator can reason about ("usage stopped because it is midnight
+# UTC"), and the counter is additive, not a rate. Why in memory: it is bounded
+# by concurrent users and resets with the process, and behind a single worker
+# it is exact. Same fails-open discipline as the scopes above — if the budget
+# bookkeeping itself throws, the request proceeds rather than denying the
+# whole app.
+_LLM_BUDGET: dict[str, Tuple[str, int]] = {}
+
+
+def llm_budget_remaining(key: str) -> Optional[int]:
+    """Charge `key` one generative call and return the calls left today.
+
+    Return semantics are: `None` means unlimited / fails-open (caller must not
+    refuse); a negative value means this call came after the cap was spent and
+    must be refused; anything >= 0 means the call was charged and allowed.
+    """
+    try:
+        cap = _env_int("LLM_DAILY_BUDGET", 30)
+        if cap <= 0:
+            return None
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        with _lock:
+            token, used = _LLM_BUDGET.get(key, (None, 0))
+            if token != day:
+                _LLM_BUDGET[key] = (day, 1)
+                return cap - 1
+            used += 1
+            _LLM_BUDGET[key] = (day, used)
+            return cap - used
+    except Exception as exc:
+        logger.error("llm budget could not be charged: %s", safe_exception(exc))
+        return None

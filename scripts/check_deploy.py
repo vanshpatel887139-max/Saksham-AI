@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-deployment checks for the eight review categories.
+"""Pre-deployment checks for the nine review categories.
 
 Run:
     DATABASE_URL=postgresql://... backend/.venv/bin/python scripts/check_deploy.py
@@ -1043,6 +1043,167 @@ def _raises_not_415(fn) -> bool:
     return True  # no error raised
 
 
+def check_business_logic() -> None:
+    """Section 9: course-completion integrity and the per-user AI budget.
+
+    Found during the adversarial review: completing the final module of a
+    course always 500'd (`is_read` is BOOLEAN; the insert passed an integer),
+    which silently broke every course completion; replays of a quiz module
+    inserted a fresh fabricated `quizzes` row each time with a client-chosen
+    score; and the LLM routes had no per-user cap. All three are covered here.
+    """
+    section("9. course-completion integrity & AI budget")
+    import rate_limit
+    import routers.courses as courses_module
+
+    # -- the assessment score is bounded to a module quiz's question count ----
+    from pydantic import ValidationError
+
+    def score_refused(value: int) -> bool:
+        try:
+            courses_module.ModuleCompleteRequest(
+                user_id="x", course_id="y", module_title="z", assessment_score=value
+            )
+            return False
+        except ValidationError:
+            return True
+
+    check("an out-of-range module assessment score (999) is refused", score_refused(999))
+    check("a negative module assessment score is refused", score_refused(-7))
+    check("a valid 0..5 module assessment score is accepted", not score_refused(4))
+
+    # -- the per-user AI budget is wired into the generative routes -----------
+    check(
+        "an LLM budget scope exists with a default daily cap",
+        rate_limit.llm_budget_remaining is not None,
+    )
+
+    # -- live: course completion no longer 500s, side effects are once-only ---
+    import main
+    import auth_tokens
+    from auth_tokens import Identity, optional_identity
+    from fastapi.testclient import TestClient
+
+    learner = Identity(
+        {
+            "id": "learner-1",
+            "role": "learner",
+            "name": "Ananya Sharma",
+            "designation": "Statistical Investigator",
+            "employeeId": "GOV-2021-0847",
+        },
+        {"id": "gate-learner-uuid", "email": "learner-1@sakshamai.demo"},
+    )
+    _saved_overrides = dict(main.app.dependency_overrides)
+    main.app.dependency_overrides[auth_tokens.current_identity] = lambda: learner
+    main.app.dependency_overrides[optional_identity] = lambda: learner
+    client = TestClient(main.app, raise_server_exceptions=False)
+    try:
+        from database import get_db_connection
+
+        catalogue = client.get("/api/courses").json()
+        course = next((k for k in catalogue if k.get("modules")), None)
+        if course is None:
+            print("    skip live course-completion checks (catalogue has no modules)")
+        else:
+            cid = course["id"]
+            # The throwaway is shared with manual testing, so reset this
+            # learner's progress on the chosen course first to guarantee the
+            # full course-completion path (including the final-module flip)
+            # runs fresh.
+            conn = get_db_connection()
+            try:
+                conn.execute(
+                    "DELETE FROM module_progress WHERE user_id = %s AND course_id = %s",
+                    ("learner-1", cid),
+                )
+                conn.execute(
+                    "DELETE FROM course_enrollments WHERE user_id = %s AND course_id = %s",
+                    ("learner-1", cid),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            mods = course["modules"]
+            client.post("/api/courses/enroll", json={"user_id": "learner-1", "course_id": cid})
+            last = None
+            for m in mods:
+                last = client.post(
+                    "/api/courses/module-complete",
+                    json={
+                        "user_id": "learner-1",
+                        "course_id": cid,
+                        "module_title": m["title"],
+                        "assessment_score": 5,
+                    },
+                )
+            check(
+                "completing the final module of a course returns 200 (was a 500)",
+                last is not None and last.status_code == 200,
+                f"status={last.status_code if last else 'no call'}",
+            )
+            check(
+                "the completed course reports courseComplete",
+                last is not None
+                and last.json().get("courseComplete") is True,
+            )
+
+            q = "SELECT count(*) FROM quizzes WHERE user_id='learner-1'"
+            a = "SELECT count(*) FROM activities WHERE user_id='learner-1'"
+            n = "SELECT count(*) FROM notifications WHERE user_id='learner-1'"
+            def _counts(which):
+                conn = get_db_connection()
+                try:
+                    return conn.execute(which).fetchone()["count"]
+                finally:
+                    conn.close()
+            cq, ca, cn = _counts(q), _counts(a), _counts(n)
+            replay = client.post(
+                "/api/courses/module-complete",
+                json={
+                    "user_id": "learner-1",
+                    "course_id": cid,
+                    "module_title": mods[0]["title"],
+                    "assessment_score": 5,
+                },
+            )
+            check(
+                "replaying an already-completed module is accepted (idempotent)",
+                replay.status_code == 200,
+            )
+            check(
+                "a replayed module does not fabricate another quiz attempt",
+                _counts(q) == cq,
+                f"quizzes {cq} -> {_counts(q)}",
+            )
+            check(
+                "a replayed completion does not re-insert activity/notification",
+                _counts(a) == ca and _counts(n) == cn,
+                f"activities {ca}->{_counts(a)}, notifications {cn}->{_counts(n)}",
+            )
+            check(
+                "a replayed completion does not re-bump competencies",
+                replay.json().get("bumped") == [],
+            )
+
+        # -- live: the AI budget refuses the cap+1 call ----------------------
+        os.environ["LLM_DAILY_BUDGET"] = "1"
+        try:
+            first = client.post("/api/assistant/chat", json={"message": "budget one"})
+            second = client.post("/api/assistant/chat", json={"message": "budget two"})
+        finally:
+            os.environ.pop("LLM_DAILY_BUDGET", None)
+            rate_limit.reset()
+        check(
+            "the per-user AI budget allows the first call and refuses the next",
+            first.status_code == 200 and second.status_code == 429,
+            f"statuses {first.status_code}, {second.status_code}",
+        )
+    finally:
+        main.app.dependency_overrides = _saved_overrides
+        rate_limit.reset()
+
+
 # ===========================================================================
 def main() -> int:
     global PRODUCTION_MODE
@@ -1072,6 +1233,7 @@ def main() -> int:
         check_cors,
         check_database,
         check_input_handling,
+        check_business_logic,
     ):
         try:
             fn()
