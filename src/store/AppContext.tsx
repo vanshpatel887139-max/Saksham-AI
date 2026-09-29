@@ -5,7 +5,7 @@ import { courses as allCoursesData } from '../data/mockData';
 import {
   apiLogin, apiUpdateProfile, apiUpdateCompetencies, apiAnalyzeGaps, apiEnrollCourse,
   apiSubmitQuiz, apiGetLabs, apiChatAssistant, apiCompleteModule, apiAdminForecast,
-  apiGetCourses, apiGetUser, apiChatHistory, isBackendAvailable, apiLogout, UNAUTHORIZED_EVENT, apiDashboard,
+  apiGetCourses, apiGetUser, isBackendAvailable, apiLogout, UNAUTHORIZED_EVENT, apiDashboard, apiClearChatHistory,
 } from '../services/api';
 import { determineEnrollment } from '../services/appService';
 
@@ -63,6 +63,8 @@ interface AppContextType extends AppState {
   markNotificationRead: (id: string) => void;
   refreshData: () => Promise<void>;
   sendAssistantMessage: (message: string) => Promise<void>;
+  /** Wipe the advisor transcript locally and on the server. */
+  clearChat: () => Promise<void>;
   completeModule: (courseId: string, moduleTitle: string, assessmentScore: number) => Promise<ModuleCompleteResult>;
   loadForecast: () => Promise<void>;
   toggleLanguage: () => void;
@@ -140,20 +142,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // worse, showed its "no data yet" messages — for the whole chain's
       // latency. In parallel they resolve in roughly one round-trip.
       await Promise.all([
-        // Restore the persisted advisor transcript so a refresh mid-conversation
-        // does not silently drop the mentor's advice.
-        apiChatHistory()
-          .then(history => {
-            if (history.length) {
-              setChatMessages(history.map((m, i) => ({
-                id: `hist-${i}`,
-                role: m.role,
-                content: m.content,
-                timestamp: m.at || new Date().toISOString(),
-              })));
-            }
-          })
-          .catch(() => { /* offline: start with an empty transcript */ }),
         apiGetLabs()
           .then(setLabs)
           .catch(() => { /* offline: keep mock labs */ }),
@@ -379,6 +367,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (data) setForecast(data);
   }, []);
 
+  const clearChat = useCallback(async () => {
+    // Drop local state immediately so the UI never waits on the network, then
+    // clear the server-side transcript best-effort (apiClearChatHistory swallows
+    // its own failures).
+    setChatMessages([]);
+    await apiClearChatHistory();
+  }, []);
+
   const toggleSidebar = useCallback(() => {
     setSidebarOpen(prev => !prev);
   }, []);
@@ -413,7 +409,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       labs, chatMessages, forecast, language,
       login, logout, updateUserProfile, updateCompetencies, setLocalAssessmentRecords, setSelectedRole,
       calculateGaps, enrollInCourse, saveQuiz, toggleSidebar, markNotificationRead, refreshData,
-      sendAssistantMessage, completeModule, loadForecast, toggleLanguage,
+      sendAssistantMessage, completeModule, loadForecast, clearChat, toggleLanguage,
     }}>
       {children}
     </AppContext.Provider>

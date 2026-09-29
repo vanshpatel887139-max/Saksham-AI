@@ -3,7 +3,7 @@ import { useApp, useI18n } from '../store/AppContext';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { Bot, X, Send, Sparkles } from 'lucide-react';
+import { Bot, X, Send, Sparkles, Trash2 } from 'lucide-react';
 
 const SUGGESTIONS = [
   'Which courses do I need?',
@@ -13,7 +13,7 @@ const SUGGESTIONS = [
 ];
 
 export default function AssistantWidget() {
-  const { chatMessages, sendAssistantMessage, language } = useApp();
+  const { chatMessages, sendAssistantMessage, language, clearChat } = useApp();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
@@ -52,6 +52,15 @@ export default function AssistantWidget() {
               <p className="text-sm font-semibold">{t('SakshamAI Assistant', 'सक्षम एआई सहायक')}</p>
               <p className="text-[10px] text-navy-300">{language === 'hi' ? 'ऑनलाइन • प्रश्न पूछें' : 'Online • Ask me anything'}</p>
             </div>
+            {chatMessages.length > 0 && (
+              <button
+                onClick={() => clearChat()}
+                title={t('Clear conversation', 'चैट साफ़ करें')}
+                className="p-1 hover:bg-navy-700 rounded cursor-pointer"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
             <button onClick={() => setOpen(false)} className="p-1 hover:bg-navy-700 rounded cursor-pointer"><X size={16} /></button>
           </div>
 
