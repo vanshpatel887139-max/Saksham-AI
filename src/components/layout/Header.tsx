@@ -1,10 +1,11 @@
-import { useApp } from '../../store/AppContext';
+import { useApp, useI18n } from '../../store/AppContext';
 import Logo from '../Logo';
 import { Bell, Menu } from 'lucide-react';
 import { useState } from 'react';
 
 export default function Header({ title }: { title: string }) {
   const { user, notifications, toggleSidebar, toggleLanguage, language } = useApp();
+  const { t } = useI18n();
   const [showNotifs, setShowNotifs] = useState(false);
   const unread = notifications.filter(n => !n.read).length;
 
@@ -26,7 +27,7 @@ export default function Header({ title }: { title: string }) {
         <button
           onClick={toggleLanguage}
           className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-navy-200 text-xs font-medium text-navy-600 hover:bg-navy-50 cursor-pointer"
-          title="Toggle language / भाषा बदलें"
+          title={t('Toggle language / भाषा बदलें', 'भाषा बदलें / Toggle language')}
         >
           <span>{language === 'en' ? '🌐 English' : '🌐 हिन्दी'}</span>
         </button>
@@ -45,7 +46,7 @@ export default function Header({ title }: { title: string }) {
           {showNotifs && (
             <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-lg border border-navy-100 py-2 z-50">
               <div className="px-4 py-2 border-b border-navy-100">
-                <h3 className="text-sm font-semibold text-navy-800">Notifications</h3>
+                <h3 className="text-sm font-semibold text-navy-800">{t('Notifications', 'सूचनाएँ')}</h3>
               </div>
               {notifications.map(n => (
                 <div key={n.id} className={`px-4 py-3 border-b border-navy-50 last:border-0 ${!n.read ? 'bg-saffron-50' : ''}`}>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import Header from '../components/layout/Header';
 import { Card, Badge, Button } from '../components/ui/UIComponents';
 import CodeRunner from '../components/CodeRunner';
-import { useApp } from '../store/AppContext';
+import { useApp, useI18n } from '../store/AppContext';
 import { BarChart3, Brain, MapPin, FlaskConical } from 'lucide-react';
 import { useStagger } from '../hooks/useStagger';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, LineChart, Line, Tooltip, Cell } from 'recharts';
@@ -30,19 +30,19 @@ const PY_ERROR_DEMO = "print('Calculating CPI...')\nrate = float('nan')\n# Refer
 
 export default function VirtualLabsPage() {
   const { labs } = useApp();
+  const { t } = useI18n();
   const { animate, staggerStyle } = useStagger();
   const [activeLab, setActiveLab] = useState(labs[0]?.id ?? 'lab-python');
 
   return (
     <div>
-      <Header title="Virtual Labs" />
+      <Header title={t('Virtual Labs', 'वर्चुअल लैब')} />
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between stagger-fade-up" style={staggerStyle(0, animate)}>
           <p className="text-sm text-navy-500 max-w-2xl">
-            Hands-on sandboxes for Official Statistics — practice Python, run SQL against real World Bank India statistics,
-            build visualizations, fit regression models and explore GIS alongside your learning modules.
+            {t('Hands-on sandboxes for Official Statistics — practice Python, run SQL against real World Bank India statistics, build visualizations, fit regression models and explore GIS alongside your learning modules.', 'आधिकारिक सांख्यिकी हेतु व्यावहारिक सैंडबॉक्स — अपने अध्ययन मॉड्यूल के साथ Python का अभ्यास करें, विश्व बैंक के वास्तविक भारत आँकड़ों पर SQL चलाएँ, विज़ुअलाइज़ेशन बनाएँ, रिग्रेशन मॉडल फ़िट करें और GIS का अन्वेषण करें।')}
           </p>
-          <Badge variant="info">Interactive</Badge>
+          <Badge variant="info">{t('Interactive', 'इंटरैक्टिव')}</Badge>
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-1 stagger-fade-up" style={staggerStyle(1, animate)}>
@@ -66,21 +66,22 @@ export default function VirtualLabsPage() {
 
 function PythonLab() {
   const { labs } = useApp();
+  const { t } = useI18n();
   const lab = labs.find(l => l.id === 'lab-python')!;
   const presets = lab.exercises.map(e => ({ title: e.title, code: e.code })).filter(e => e.title !== undefined) as { title: string; code: string }[];
   const pythonPresets = [
     ...presets,
-    { title: 'Error demo', code: PY_ERROR_DEMO },
+    { title: t('Error demo', 'त्रुटि प्रदर्शन'), code: PY_ERROR_DEMO },
   ];
 
   return (
     <Card>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-navy-800">🐍 Interactive Python Sandbox</h3>
-          <p className="text-xs text-navy-400 mt-1">Real CPython execution — syntax errors and tracebacks (NameError, TypeError, ZeroDivisionError…) are shown for any error.</p>
+          <h3 className="text-sm font-semibold text-navy-800">{t('🐍 Interactive Python Sandbox', '🐍 इंटरैक्टिव Python सैंडबॉक्स')}</h3>
+          <p className="text-xs text-navy-400 mt-1">{t('Real CPython execution — syntax errors and tracebacks (NameError, TypeError, ZeroDivisionError…) are shown for any error.', 'वास्तविक CPython निष्पादन — सिंटैक्स त्रुटियाँ और ट्रेसबैक (NameError, TypeError, ZeroDivisionError…) किसी भी त्रुटि हेतु प्रदर्शित किए जाते हैं।')}</p>
         </div>
-        <Badge variant="success">Real CPython</Badge>
+        <Badge variant="success">{t('Real CPython', 'वास्तविक CPython')}</Badge>
       </div>
       <CodeRunner initialCode={presets[0]?.code ?? ''} presets={pythonPresets} engine="python" />
     </Card>
@@ -97,6 +98,7 @@ function SQLLab() {
   const [observations, setObservations] = useState<Row[]>([]);
   const [loadError, setLoadError] = useState('');
   const [attribution, setAttribution] = useState<StatIndicator | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     let cancelled = false;
@@ -142,33 +144,31 @@ function SQLLab() {
   }, []);
 
   const sqlPresets = [
-    { title: 'All indicators', code: 'SELECT code, name, category FROM indicators ORDER BY category' },
-    { title: 'Life expectancy over time', code: "SELECT year, value FROM observations WHERE indicator_code = 'SP.DYN.LE00.IN' ORDER BY year" },
-    { title: 'Since 2000', code: "SELECT year, value FROM observations WHERE indicator_code = 'SP.DYN.LE00.IN' AND year > 2000 ORDER BY year DESC" },
-    { title: 'Count observations', code: 'SELECT COUNT(*) FROM observations' },
-    { title: 'Average life expectancy', code: "SELECT AVG(value) FROM observations WHERE indicator_code = 'SP.DYN.LE00.IN'" },
-    { title: 'Health indicators', code: "SELECT code, name FROM indicators WHERE category = 'Health'" },
+    { title: t('All indicators', 'सभी संकेतक'), code: 'SELECT code, name, category FROM indicators ORDER BY category' },
+    { title: t('Life expectancy over time', 'समय के साथ आयु स्थायित्व'), code: "SELECT year, value FROM observations WHERE indicator_code = 'SP.DYN.LE00.IN' ORDER BY year" },
+    { title: t('Since 2000', '2000 के बाद से'), code: "SELECT year, value FROM observations WHERE indicator_code = 'SP.DYN.LE00.IN' AND year > 2000 ORDER BY year DESC" },
+    { title: t('Count observations', 'प्रेक्षणों की गिनती'), code: 'SELECT COUNT(*) FROM observations' },
+    { title: t('Average life expectancy', 'औसत आयु स्थायित्व'), code: "SELECT AVG(value) FROM observations WHERE indicator_code = 'SP.DYN.LE00.IN'" },
+    { title: t('Health indicators', 'स्वास्थ्य संकेतक'), code: "SELECT code, name FROM indicators WHERE category = 'Health'" },
   ];
 
   return (
     <Card>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-navy-800">🗃️ SQL on World Bank India Data</h3>
-          <p className="text-xs text-navy-400 mt-1">SELECT / WHERE / ORDER BY / aggregates on {observations.length || '…'} real observations across {indicators.length || '…'} indicators. Invalid queries report an error.</p>
+          <h3 className="text-sm font-semibold text-navy-800">{t('🗃️ SQL on World Bank India Data', '🗃️ विश्व बैंक भारत आँकड़ों पर SQL')}</h3>
+          <p className="text-xs text-navy-400 mt-1">SELECT / WHERE / ORDER BY / {t('aggregates on', 'समुच्चय क्रियाओं सहित —')} {observations.length || '…'} {t('real observations across', 'वास्तविक प्रेक्षण तथा')} {indicators.length || '…'} {t('indicators.', 'संकेतकों पर कार्य करती हैं।')} {t('Invalid queries report an error.', 'अमान्य क्वेरी पर त्रुटि दर्शाई जाती है।')}</p>
         </div>
-        <Badge variant="success">Real query engine</Badge>
+        <Badge variant="success">{t('Real query engine', 'वास्तविक क्वेरी इंजन')}</Badge>
       </div>
       {loadError && (
         <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-          Could not load the live dataset ({loadError}). The sandbox is running on its
-          built-in sample rows, which are placeholders — sign in and check the API
-          before quoting any number from here.
+          {t('Could not load the live dataset', 'लाइव डेटासेट लोड नहीं हो सका')} ({loadError}). {t('The sandbox is running on its built-in sample rows, which are placeholders — sign in and check the API before quoting any number from here.', 'सैंडबॉक्स अपने अंतर्निहित नमूना पंक्तियों पर चल रहा है, जो केवल प्लेसहोल्डर हैं — यहाँ से कोई भी संख्या उद्धृत करने से पूर्व साइन इन करें और API जाँचें।')}
         </p>
       )}
       {!loadError && attribution && (
         <p className="mb-3 rounded-lg border border-navy-100 bg-navy-50 px-3 py-2 text-[11px] text-navy-500">
-          Source: {attribution.source} · {attribution.license} · {attribution.source_url}
+          {t('Source:', 'स्रोत:')} {attribution.source} · {attribution.license} · {attribution.source_url}
           {' · '}{attribution.provenance}
         </p>
       )}
@@ -179,6 +179,7 @@ function SQLLab() {
 
 function VizLab() {
   const { labs } = useApp();
+  const { t } = useI18n();
   const lab = labs.find(l => l.id === 'lab-viz')!;
   const preset = lab.exercises[0];
   const [labels, setLabels] = useState((preset.labels || []).join(', '));
@@ -192,12 +193,12 @@ function VizLab() {
     const ls = labels.split(',').map(s => s.trim()).filter(Boolean);
     const vs = values.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
     if (ls.length === 0) {
-      setVizError('Please enter at least one label, comma-separated.');
+      setVizError(t('Please enter at least one label, comma-separated.', 'कृपया कम से कम एक लेबल दर्ज करें, अल्प-विराम से अलग किया हुआ।'));
       setData([]);
       return;
     }
     if (ls.length !== vs.length) {
-      setVizError(`Label count (${ls.length}) and numeric value count (${vs.length}) must match. Enter valid numbers, comma-separated.`);
+      setVizError(`${t('Label count (', 'लेबल की संख्या (')}${ls.length}) ${t('and numeric value count (', 'और संख्यात्मक मानों की संख्या (')}${vs.length})${t(' must match. Enter valid numbers, comma-separated.', ' समान होनी चाहिए। मान्य संख्याएँ दर्ज करें, अल्प-विराम से अलग की हुई।')}`);
       setData([]);
       return;
     }
@@ -209,23 +210,23 @@ function VizLab() {
     <Card>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-navy-800">📈 Data Visualization Builder</h3>
-          <p className="text-xs text-navy-400 mt-1">Labels and numeric values must be equal length; invalid input shows an error instead of silently dropping data.</p>
+          <h3 className="text-sm font-semibold text-navy-800">{t('📈 Data Visualization Builder', '📈 डेटा विज़ुअलाइज़ेशन बिल्डर')}</h3>
+          <p className="text-xs text-navy-400 mt-1">{t('Labels and numeric values must be equal length; invalid input shows an error instead of silently dropping data.', 'लेबल और संख्यात्मक मान समान लंबाई के होने चाहिए; अमान्य इनपुट पर डेटा चुपचाप हटाए बजाय त्रुटि दर्शाई जाती है।')}</p>
         </div>
-        <Badge variant="success">Live render</Badge>
+        <Badge variant="success">{t('Live render', 'तत्काल प्रदर्शन')}</Badge>
       </div>
       <div className="grid md:grid-cols-2 gap-4">
         <div className="space-y-3">
-          <label className="block text-xs font-medium text-navy-600">Labels (comma separated)</label>
+          <label className="block text-xs font-medium text-navy-600">{t('Labels (comma separated)', 'लेबल (अल्प-विराम से अलग)')}</label>
           <input value={labels} onChange={e => setLabels(e.target.value)} className="w-full px-3 py-2 border border-navy-200 rounded-lg text-sm" placeholder="Alwar, Mysuru, Nashik" />
-          <label className="block text-xs font-medium text-navy-600">Values (comma separated)</label>
+          <label className="block text-xs font-medium text-navy-600">{t('Values (comma separated)', 'मान (अल्प-विराम से अलग)')}</label>
           <input value={values} onChange={e => setValues(e.target.value)} className="w-full px-3 py-2 border border-navy-200 rounded-lg text-sm" placeholder="70.7, 72.6, 80.9" />
-          <Button onClick={render}><BarChart3 size={14} className="mr-1" /> Render Chart</Button>
+          <Button onClick={render}><BarChart3 size={14} className="mr-1" /> {t('Render Chart', 'चार्ट प्रदर्शित करें')}</Button>
           {vizError && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600">✖ {vizError}</div>
           )}
           <div className="bg-navy-50 rounded-lg p-3 text-[11px] text-navy-500">
-            💡 Try literacy rates (%) by district, or monthly CPI values, or household survey counts by state.
+            💡 {t('Try literacy rates (%) by district, or monthly CPI values, or household survey counts by state.', 'जिला-वार साक्षरता दर (%), मासिक CPI मान, या राज्यवार घरेलू सर्वेक्षण गिनती आज़माएँ।')}
           </div>
         </div>
         <ResponsiveContainer width="100%" height={260}>
@@ -246,6 +247,7 @@ function VizLab() {
 
 function MLLab() {
   const { labs } = useApp();
+  const { t } = useI18n();
   const lab = labs.find(l => l.id === 'lab-ml')!;
   const ex = lab.exercises[0];
   const [xRaw, setXRaw] = useState((ex.x || []).join(', '));
@@ -257,12 +259,12 @@ function MLLab() {
     const xs = xRaw.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
     const ys = yRaw.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
     if (xs.length < 2) {
-      setMlError('Enter at least 2 numeric X values (comma-separated).');
+      setMlError(t('Enter at least 2 numeric X values (comma-separated).', 'कम से कम 2 संख्यात्मक X मान दर्ज करें (अल्प-विराम से अलग)।'));
       setFit(null);
       return;
     }
     if (ys.length !== xs.length) {
-      setMlError(`X has ${xs.length} values but Y has ${ys.length}. They must be equal length to fit a model.`);
+      setMlError(`${t('X has', 'X में')} ${xs.length} ${t('values but Y has', 'मान हैं, जबकि Y में')} ${ys.length}. ${t('They must be equal length to fit a model.', 'मॉडल फ़िट करने हेतु दोनों की लंबाई समान होनी चाहिए।')}`);
       setFit(null);
       return;
     }
@@ -281,27 +283,27 @@ function MLLab() {
     <Card>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-sm font-semibold text-navy-800">🤖 Linear Regression — the math behind forecast</h3>
-          <p className="text-xs text-navy-400 mt-1">Fit a line to X/Y data points. Insufficient or mismatched data shows an error.</p>
+          <h3 className="text-sm font-semibold text-navy-800">{t('🤖 Linear Regression — the math behind forecast', '🤖 लीनियर रिग्रेशन — पूर्वानुमान का गणित')}</h3>
+          <p className="text-xs text-navy-400 mt-1">{t('Fit a line to X/Y data points. Insufficient or mismatched data shows an error.', 'X/Y आँकड़ बिंदुओं पर एक रेखा फ़िट करें। अपर्याप्त या अमेल डेटा पर त्रुटि दर्शाई जाती है।')}</p>
         </div>
-        <Badge variant="success">Supervised learning</Badge>
+        <Badge variant="success">{t('Supervised learning', 'पर्यवेक्षित अधिगम')}</Badge>
       </div>
       <div className="grid md:grid-cols-2 gap-4">
         <div className="space-y-3">
-          <label className="block text-xs font-medium text-navy-600">X values (e.g. hours studied)</label>
+          <label className="block text-xs font-medium text-navy-600">{t('X values (e.g. hours studied)', 'X मान (जैसे अध्ययन घंटे)')}</label>
           <input value={xRaw} onChange={e => setXRaw(e.target.value)} className="w-full px-3 py-2 border border-navy-200 rounded-lg text-sm" />
-          <label className="block text-xs font-medium text-navy-600">Y values (e.g. quiz score)</label>
+          <label className="block text-xs font-medium text-navy-600">{t('Y values (e.g. quiz score)', 'Y मान (जैसे क्विज़ अंक)')}</label>
           <input value={yRaw} onChange={e => setYRaw(e.target.value)} className="w-full px-3 py-2 border border-navy-200 rounded-lg text-sm" />
-          <Button onClick={run}><Brain size={14} className="mr-1" /> Fit Model</Button>
+          <Button onClick={run}><Brain size={14} className="mr-1" /> {t('Fit Model', 'मॉडल फ़िट करें')}</Button>
           {mlError && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600">✖ {mlError}</div>
           )}
           {fit && (
             <div className="bg-navy-50 rounded-lg p-4 space-y-1 text-sm">
-              <p>Slope: <b>{fit.slope.toFixed(3)}</b> (points gained per hour)</p>
-              <p>Intercept: <b>{fit.intercept.toFixed(2)}</b></p>
-              <p>R² = <b>{fit.r2.toFixed(3)}</b> {fit.r2 > 0.9 ? '— excellent fit' : ''}</p>
-              <p>Predicted × 8h: <b>{fit.predict(8).toFixed(1)}</b></p>
+              <p>{t('Slope:', 'ढाल:')} <b>{fit.slope.toFixed(3)}</b> {t('(points gained per hour)', '(प्रति घंटा अर्जित अंक)')}</p>
+              <p>{t('Intercept:', 'अन्तःखण्ड:')} <b>{fit.intercept.toFixed(2)}</b></p>
+              <p>R² = <b>{fit.r2.toFixed(3)}</b> {fit.r2 > 0.9 ? t('— excellent fit', '— उत्कृष्ट फ़िट') : ''}</p>
+              <p>{t('Predicted × 8h:', '8 घंटे हेतु अनुमानित अंक:')} <b>{fit.predict(8).toFixed(1)}</b></p>
             </div>
           )}
           <p className="text-[11px] text-navy-400">{ex.explain}</p>
@@ -312,8 +314,8 @@ function MLLab() {
             <XAxis dataKey="x" tick={{ fontSize: 10 }} />
             <YAxis tick={{ fontSize: 10 }} />
             <Tooltip />
-            <Line type="monotone" dataKey="actual" name="Actual" stroke="#0d1320" strokeWidth={2} dot={{ r: 3 }} />
-            <Line type="monotone" dataKey="predicted" name="Predicted" stroke="#f97316" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+            <Line type="monotone" dataKey="actual" name={t('Actual', 'वास्तविक')} stroke="#0d1320" strokeWidth={2} dot={{ r: 3 }} />
+            <Line type="monotone" dataKey="predicted" name={t('Predicted', 'अनुमानित')} stroke="#f97316" strokeWidth={2} strokeDasharray="5 5" dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -323,6 +325,7 @@ function MLLab() {
 
 function GISLab() {
   const { labs } = useApp();
+  const { t } = useI18n();
   const lab = labs.find(l => l.id === 'lab-gis')!;
   const ex = lab.exercises[0];
   const points = (ex.points || []) as [string, number][];
@@ -331,8 +334,8 @@ function GISLab() {
   return (
     <Card>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-navy-800">🗺️ Thematic Map — GIS for Official Statistics</h3>
-        <Badge variant="success">Choropleth mode</Badge>
+        <h3 className="text-sm font-semibold text-navy-800">{t('🗺️ Thematic Map — GIS for Official Statistics', '🗺️ थीमैटिक मानचित्र — आधिकारिक सांख्यिकी हेतु GIS')}</h3>
+        <Badge variant="success">{t('Choropleth mode', 'कोरोप्लेथ मोड')}</Badge>
       </div>
       <div className="bg-navy-50 rounded-2xl p-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -347,7 +350,7 @@ function GISLab() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-navy-800">{district}</p>
-                    <p className="text-[11px] text-navy-400">Literacy {tr}%</p>
+                    <p className="text-[11px] text-navy-400">{t('Literacy', 'साक्षरता')} {tr}%</p>
                   </div>
                 </div>
                 <MapPin size={16} className="text-navy-300" />
@@ -356,14 +359,14 @@ function GISLab() {
           })}
         </div>
         <div className="flex items-center gap-2 mt-4 text-[10px] text-navy-500">
-          <span className="w-3 h-3 rounded-sm" style={{ background: '#fde68a' }} /> Low
-          <span className="w-3 h-3 rounded-sm" style={{ background: '#fbbf24' }} /> Medium
-          <span className="w-3 h-3 rounded-sm" style={{ background: '#f59e0b' }} /> High
-          <span className="w-3 h-3 rounded-sm" style={{ background: '#f97316' }} /> Highest
-          <span className="ml-auto">Legend — same data ranked by GIS colour intensity</span>
+          <span className="w-3 h-3 rounded-sm" style={{ background: '#fde68a' }} /> {t('Low', 'निम्न')}
+          <span className="w-3 h-3 rounded-sm" style={{ background: '#fbbf24' }} /> {t('Medium', 'मध्यम')}
+          <span className="w-3 h-3 rounded-sm" style={{ background: '#f59e0b' }} /> {t('High', 'उच्च')}
+          <span className="w-3 h-3 rounded-sm" style={{ background: '#f97316' }} /> {t('Highest', 'सर्वाधिक')}
+          <span className="ml-auto">{t('Legend — same data ranked by GIS colour intensity', 'संकेत-सूची — वही डेटा GIS रंग तीव्रता के अनुसार क्रमबद्ध')}</span>
         </div>
       </div>
-      <p className="text-[11px] text-navy-400 mt-3 flex items-center gap-1"><FlaskConical size={12} /> GIS layers combine administrative boundaries with statistical attributes to reveal spatial patterns in official data.</p>
+      <p className="text-[11px] text-navy-400 mt-3 flex items-center gap-1"><FlaskConical size={12} /> {t('GIS layers combine administrative boundaries with statistical attributes to reveal spatial patterns in official data.', 'GIS परतें प्रशासनिक सीमाओं को सांख्यिकीय विशेषताओं के साथ मिलाकर आधिकारिक डेटा में स्थानीय पैटर्न को उजागर करती हैं।')}</p>
     </Card>
   );
 }

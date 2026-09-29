@@ -1,4 +1,5 @@
 import { ReactNode, type CSSProperties } from 'react';
+import { useI18n } from '../../store/AppContext';
 
 interface CardProps {
   children: ReactNode;
@@ -199,6 +200,7 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, children, maxWidth = 'max-w-4xl', className = '' }: ModalProps) {
+  const { t } = useI18n();
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
@@ -209,7 +211,7 @@ export function Modal({ open, onClose, title, children, maxWidth = 'max-w-4xl', 
             <button
               onClick={onClose}
               className="rounded-full p-1 text-navy-400 transition hover:bg-navy-50 hover:text-navy-600"
-              aria-label="Close modal"
+              aria-label={t('Close modal', 'मोडल बंद करें')}
             >
               ×
             </button>

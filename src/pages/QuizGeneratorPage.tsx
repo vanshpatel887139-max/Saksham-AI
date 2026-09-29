@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import Header from '../components/layout/Header';
 import { Card, Button, Badge } from '../components/ui/UIComponents';
-import { useApp } from '../store/AppContext';
+import { useApp, useI18n } from '../store/AppContext';
 import { QuizQuestion } from '../types';
 import { apiGenerateQuiz, apiGenerateQuizFromFile } from '../services/api';
 import { Brain, Upload, FileText, Check, X, RotateCcw, AlertTriangle, Edit3, Trash2 } from 'lucide-react';
@@ -11,6 +11,7 @@ const SAMPLE_TEXT = `Official statistics form the backbone of evidence-based pol
 
 export default function QuizGeneratorPage() {
   const { saveQuiz } = useApp();
+  const { t } = useI18n();
   const { animate, staggerStyle } = useStagger();
   const [inputMethod, setInputMethod] = useState<'paste' | 'upload'>('paste');
   const [text, setText] = useState('');
@@ -110,17 +111,17 @@ export default function QuizGeneratorPage() {
   if (inQuiz) {
     return (
       <div>
-        <Header title="Quiz in Progress" />
+        <Header title={t('Quiz in Progress', 'क्विज़ जारी है')} />
         <div className="p-6 max-w-3xl mx-auto space-y-6">
           {submitted && (
             <Card className="bg-gradient-to-r from-navy-800 to-navy-900 text-white">
               <div className="text-center py-4">
-                <h2 className="text-2xl font-bold mb-1">Quiz Complete!</h2>
+                <h2 className="text-2xl font-bold mb-1">{t('Quiz Complete!', 'क्विज़ पूरा हुआ!')}</h2>
                 <p className="text-4xl font-bold text-saffron-400">{score}/{questions.length}</p>
-                <p className="text-navy-200 mt-1">{Math.round(score / questions.length * 100)}% Score</p>
+                <p className="text-navy-200 mt-1">{Math.round(score / questions.length * 100)}% {t('Score', 'अंक')}</p>
                 <div className="flex gap-3 justify-center mt-4">
-                  <Button onClick={() => { setInQuiz(false); setSubmitted(false); setQuestions([]); }} variant="ghost" className="text-white border border-white/20">New Quiz</Button>
-                  <Button onClick={() => { setSubmitted(false); setAnswers(new Array(questions.length).fill(null)); }}>Retake Quiz</Button>
+                  <Button onClick={() => { setInQuiz(false); setSubmitted(false); setQuestions([]); }} variant="ghost" className="text-white border border-white/20">{t('New Quiz', 'नया क्विज़')}</Button>
+                  <Button onClick={() => { setSubmitted(false); setAnswers(new Array(questions.length).fill(null)); }}>{t('Retake Quiz', 'क्विज़ दोबारा दें')}</Button>
                 </div>
               </div>
             </Card>
@@ -128,8 +129,8 @@ export default function QuizGeneratorPage() {
 
           {!submitted && (
             <div className="flex items-center justify-between stagger-fade-up" style={staggerStyle(0, animate)}>
-              <p className="text-sm text-navy-500">Answer all questions, then submit</p>
-              <Button onClick={handleSubmit}>Submit Quiz</Button>
+              <p className="text-sm text-navy-500">{t('Answer all questions, then submit', 'सभी प्रश्नों के उत्तर दें, फिर जमा करें')}</p>
+              <Button onClick={handleSubmit}>{t('Submit Quiz', 'क्विज़ जमा करें')}</Button>
             </div>
           )}
 
@@ -167,7 +168,7 @@ export default function QuizGeneratorPage() {
               </div>
               {submitted && (
                 <div className={`mt-3 p-3 rounded-lg text-xs ${answers[qi] === q.correctAnswer ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                  <p className="font-medium mb-1">{answers[qi] === q.correctAnswer ? 'Correct!' : 'Incorrect'}</p>
+                  <p className="font-medium mb-1">{answers[qi] === q.correctAnswer ? t('Correct!', 'सही!') : t('Incorrect', 'ग़लत')}</p>
                   <p>{q.explanation}</p>
                 </div>
               )}
@@ -180,22 +181,22 @@ export default function QuizGeneratorPage() {
 
   return (
     <div>
-      <Header title="AI Quiz Generator" />
+      <Header title={t('AI Quiz Generator', 'एआई क्विज़ जनरेटर')} />
       <div className="p-6 space-y-6 max-w-4xl mx-auto">
         <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-start gap-2 stagger-fade-up" style={staggerStyle(0, animate)}>
           <AlertTriangle size={16} className="text-amber-500 mt-0.5 shrink-0" />
-          <p className="text-xs text-amber-700">AI-generated questions should be reviewed by an authorized trainer before official use.</p>
+          <p className="text-xs text-amber-700">{t('AI-generated questions should be reviewed by an authorized trainer before official use.', 'एआई से तैयार किए गए प्रश्नों का आधिकारिक उपयोग से पहले किसी अधिकृत प्रशिक्षक द्वारा समीक्षा की जानी चाहिए।')}</p>
         </div>
 
         <Card className="stagger-fade-up" style={staggerStyle(1, animate)}>
-          <h2 className="text-base font-semibold text-navy-800 mb-4">Input Learning Material</h2>
+          <h2 className="text-base font-semibold text-navy-800 mb-4">{t('Input Learning Material', 'अध्ययन सामग्री दर्ज करें')}</h2>
 
           <div className="flex gap-3 mb-4">
             <Button variant={inputMethod === 'paste' ? 'primary' : 'ghost'} size="sm" onClick={() => setInputMethod('paste')}>
-              <FileText size={14} className="mr-1" /> Paste Text
+              <FileText size={14} className="mr-1" /> {t('Paste Text', 'टेक्स्ट चिपकाएँ')}
             </Button>
             <Button variant={inputMethod === 'upload' ? 'primary' : 'ghost'} size="sm" onClick={() => setInputMethod('upload')}>
-              <Upload size={14} className="mr-1" /> Upload File
+              <Upload size={14} className="mr-1" /> {t('Upload File', 'फ़ाइल अपलोड करें')}
             </Button>
           </div>
 
@@ -203,47 +204,47 @@ export default function QuizGeneratorPage() {
             <textarea
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder="Paste your learning content here... (Leave empty to use sample content)"
+              placeholder={t('Paste your learning content here... (Leave empty to use sample content)', 'अपनी अध्ययन सामग्री यहाँ चिपकाएँ... (नमूना सामग्री हेतु खाली छोड़ें)')}
               className="w-full h-40 p-3 border border-navy-200 rounded-lg text-sm resize-none focus:ring-2 focus:ring-saffron-400 outline-none"
             />
           ) : (
             <div className="border-2 border-dashed border-navy-200 rounded-lg p-8 text-center">
               <input ref={fileInputRef} type="file" accept=".pdf,.docx,.pptx,.ppt,.txt,.srt,.vtt" onChange={handleFileUpload} className="hidden" />
               <Upload size={32} className="mx-auto text-navy-300 mb-2" />
-              <p className="text-sm text-navy-500 mb-2">Drag & drop or click to upload</p>
-              <p className="text-xs text-navy-400 mb-3">PDF, DOCX, PPTX, TXT, SRT, VTT transcripts</p>
-              <Button size="sm" onClick={() => fileInputRef.current?.click()}>Choose File</Button>
+              <p className="text-sm text-navy-500 mb-2">{t('Drag & drop or click to upload', 'अपलोड करने हेतु खींचें और छोड़ें या क्लिक करें')}</p>
+              <p className="text-xs text-navy-400 mb-3">{t('PDF, DOCX, PPTX, TXT, SRT, VTT transcripts', 'PDF, DOCX, PPTX, TXT, SRT, VTT प्रतिलेख')}</p>
+              <Button size="sm" onClick={() => fileInputRef.current?.click()}>{t('Choose File', 'फ़ाइल चुनें')}</Button>
               {fileName ? (
-                <p className="text-xs text-green-600 mt-2 font-medium">📄 {fileName} — loaded for real text extraction</p>
+                <p className="text-xs text-green-600 mt-2 font-medium">📄 {fileName} {t('— loaded for real text extraction', '— वास्तविक पाठ निष्कर्षण हेतु लोड किया गया')}</p>
               ) : (
-                <p className="text-xs text-navy-400 mt-2">Supported formats are parsed server-side; SRT/VTT timestamps are stripped automatically.</p>
+                <p className="text-xs text-navy-400 mt-2">{t('Supported formats are parsed server-side; SRT/VTT timestamps are stripped automatically.', 'समर्थित प्रारूप सर्वर-साइड संसाधित किए जाते हैं; SRT/VTT समय-मुद्राएँ स्वतः हटा दी जाती हैं।')}</p>
               )}
             </div>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
             <div>
-              <label className="block text-sm font-medium text-navy-700 mb-1">Number of Questions</label>
+              <label className="block text-sm font-medium text-navy-700 mb-1">{t('Number of Questions', 'प्रश्नों की संख्या')}</label>
               <select value={questionCount} onChange={e => setQuestionCount(Number(e.target.value))} className="w-full px-3 py-2 border border-navy-200 rounded-lg text-sm bg-white">
-                <option value={5}>5 Questions</option>
-                <option value={10}>10 Questions</option>
-                <option value={15}>15 Questions</option>
+                <option value={5}>{t('5 Questions', '5 प्रश्न')}</option>
+                <option value={10}>{t('10 Questions', '10 प्रश्न')}</option>
+                <option value={15}>{t('15 Questions', '15 प्रश्न')}</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-navy-700 mb-1">Difficulty</label>
+              <label className="block text-sm font-medium text-navy-700 mb-1">{t('Difficulty', 'कठिनाई')}</label>
               <select value={difficulty} onChange={e => setDifficulty(e.target.value)} className="w-full px-3 py-2 border border-navy-200 rounded-lg text-sm bg-white">
-                <option value="Easy">Easy</option>
-                <option value="Medium">Medium</option>
-                <option value="Hard">Hard</option>
+                <option value="Easy">{t('Easy', 'सरल')}</option>
+                <option value="Medium">{t('Medium', 'मध्यम')}</option>
+                <option value="Hard">{t('Hard', 'कठिन')}</option>
               </select>
             </div>
             <div className="flex items-end">
               <Button onClick={handleGenerate} disabled={generating} className="w-full">
                 {generating ? (
-                  <><span className="animate-spin mr-2">⟳</span> Generating...</>
+                  <><span className="animate-spin mr-2">⟳</span> {t('Generating...', 'तैयार किया जा रहा है...')}</>
                 ) : (
-                  <><Brain size={16} className="mr-1" /> Generate Quiz</>
+                  <><Brain size={16} className="mr-1" /> {t('Generate Quiz', 'क्विज़ तैयार करें')}</>
                 )}
               </Button>
             </div>
@@ -253,14 +254,14 @@ export default function QuizGeneratorPage() {
         {questions.length > 0 && !inQuiz && (
           <>
             <div className="flex items-center justify-between stagger-fade-up" style={staggerStyle(2, animate)}>
-              <h2 className="text-base font-semibold text-navy-800">Generated Questions ({questions.length})</h2>
+              <h2 className="text-base font-semibold text-navy-800">{t('Generated Questions', 'तैयार किए गए प्रश्न')} ({questions.length})</h2>
               <div className="flex items-center gap-2">
                 {generatedBy && (
                   <Badge variant={generatedBy.startsWith('llm') ? 'success' : 'default'}>
-                    {generatedBy.startsWith('llm') ? `AI · ${generatedBy.split(':')[1] ?? ''}` : 'Rule-based'}
+                    {generatedBy.startsWith('llm') ? `AI · ${generatedBy.split(':')[1] ?? ''}` : t('Rule-based', 'नियम-आधारित')}
                   </Badge>
                 )}
-                <Button onClick={startQuiz}>Start Quiz</Button>
+                <Button onClick={startQuiz}>{t('Start Quiz', 'क्विज़ शुरू करें')}</Button>
               </div>
             </div>
 
@@ -275,8 +276,8 @@ export default function QuizGeneratorPage() {
                     {editingId === q.id ? (
                       <div className="flex gap-2 mb-2">
                         <input value={editText} onChange={e => setEditText(e.target.value)} className="flex-1 px-3 py-1 border border-navy-200 rounded text-sm" />
-                        <Button size="sm" onClick={() => handleSaveEdit(q.id)}>Save</Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Cancel</Button>
+                        <Button size="sm" onClick={() => handleSaveEdit(q.id)}>{t('Save', 'सहेजें')}</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>{t('Cancel', 'रद्द करें')}</Button>
                       </div>
                     ) : (
                       <p className="text-sm font-medium text-navy-800 mb-2">{q.question}</p>
@@ -288,7 +289,7 @@ export default function QuizGeneratorPage() {
                         </div>
                       ))}
                     </div>
-                    <p className="text-xs text-navy-400 mt-2 italic">Source: {q.sourceExcerpt}</p>
+                    <p className="text-xs text-navy-400 mt-2 italic">{t('Source:', 'स्रोत:')} {q.sourceExcerpt}</p>
                   </div>
                   <div className="flex gap-1 ml-3">
                     <button onClick={() => { setEditingId(q.id); setEditText(q.question); }} className="p-1.5 rounded hover:bg-navy-100 cursor-pointer"><Edit3 size={14} className="text-navy-400" /></button>

@@ -1,4 +1,4 @@
-import { useApp } from '../store/AppContext';
+import { useApp, useI18n } from '../store/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { Shield, BarChart3, Lock, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -9,6 +9,7 @@ const DEMO_EMAIL = 'learner-1@sakshamai.demo';
 
 export default function LoginPage() {
   const { login } = useApp();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -29,7 +30,7 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     if (!email || !password) {
-      setError('Enter your email and password.');
+      setError(t('Enter your email and password.', 'अपना ईमेल और पासवर्ड दर्ज करें।'));
       return;
     }
     setLoading(true);
@@ -39,7 +40,7 @@ export default function LoginPage() {
     } catch (err) {
       // Never fall back to a mock user here — a failed sign-in must not look
       // like a successful one.
-      setError(err instanceof Error ? err.message : 'Sign-in failed');
+      setError(err instanceof Error ? err.message : t('Sign-in failed', 'साइन-इन विफल रहा'));
       setLoading(false);
     }
   };
@@ -61,17 +62,17 @@ export default function LoginPage() {
             <Logo variant="full" height={72} />
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">SakshamAI</h1>
-          <p className="text-navy-300 text-sm">Skill Intelligence Platform for Official Statistics</p>
+          <p className="text-navy-300 text-sm">{t('Skill Intelligence Platform for Official Statistics', 'आधिकारिक सांख्यिकी हेतु कौशल बुद्धिमत्ता मंच')}</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <h2 className="text-xl font-semibold text-navy-800 text-center mb-6">Sign In to Your Account</h2>
+          <h2 className="text-xl font-semibold text-navy-800 text-center mb-6">{t('Sign In to Your Account', 'अपने खाते में साइन इन करें')}</h2>
 
           {accounts.length > 0 && (
             <div className="mb-6">
               <div className="flex items-center gap-2 text-xs font-medium text-navy-500 uppercase tracking-wide mb-3">
                 <Users size={14} />
-                <span>Demo accounts</span>
+                <span>{t('Demo accounts', 'डेमो खाते')}</span>
               </div>
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                 {accounts.map(a => {
@@ -98,7 +99,7 @@ export default function LoginPage() {
                       </div>
                       {a.role === 'admin' && (
                         <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 bg-navy-100 text-navy-600 rounded shrink-0">
-                          ADMIN
+                          {t('ADMIN', 'व्यवस्थापक')}
                         </span>
                       )}
                     </button>
@@ -107,7 +108,7 @@ export default function LoginPage() {
               </div>
               {demoPassword && (
                 <p className="mt-3 text-xs text-navy-400">
-                  Demo password: <code className="font-mono text-navy-600">{demoPassword}</code>
+                  {t('Demo password:', 'डेमो पासवर्ड:')} <code className="font-mono text-navy-600">{demoPassword}</code>
                 </p>
               )}
             </div>
@@ -116,7 +117,7 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-navy-700 mb-1.5">
-                Email
+                {t('Email', 'ईमेल')}
               </label>
               <input
                 id="email"
@@ -131,7 +132,7 @@ export default function LoginPage() {
 
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-navy-700 mb-1.5">
-                Password
+                {t('Password', 'पासवर्ड')}
               </label>
               <input
                 id="password"
@@ -158,23 +159,23 @@ export default function LoginPage() {
               {loading
                 ? <span className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                 : <Lock size={18} />}
-              {loading ? 'Signing in…' : 'Sign In'}
+              {loading ? t('Signing in…', 'साइन इन किया जा रहा है…') : t('Sign In', 'साइन इन')}
             </button>
           </form>
 
           <div className="mt-6 pt-4 border-t border-navy-100">
             <div className="flex items-center gap-2 justify-center text-xs text-navy-400">
               <Lock size={12} />
-              <span>Credentials verified by Supabase Auth when a server is connected</span>
+              <span>{t('Credentials verified by Supabase Auth when a server is connected', 'सर्वर जुड़ा होने पर क्रेडेंशियल की जाँच Supabase Auth द्वारा की जाती है')}</span>
             </div>
           </div>
         </div>
 
         <div className="mt-6 space-y-2">
           <div className="flex items-center justify-center gap-2 text-xs text-navy-400">
-            <span className="px-2 py-0.5 bg-navy-700 rounded text-navy-200 text-[10px]">MOCK iGOT API</span>
-            <span className="px-2 py-0.5 bg-navy-700 rounded text-navy-200 text-[10px]">DEMO DATA</span>
-            <span className="px-2 py-0.5 bg-navy-700 rounded text-navy-200 text-[10px]">SIH PROTOTYPE</span>
+            <span className="px-2 py-0.5 bg-navy-700 rounded text-navy-200 text-[10px]">{t('MOCK iGOT API', 'मॉक iGOT एपीआई')}</span>
+            <span className="px-2 py-0.5 bg-navy-700 rounded text-navy-200 text-[10px]">{t('DEMO DATA', 'डेमो डेटा')}</span>
+            <span className="px-2 py-0.5 bg-navy-700 rounded text-navy-200 text-[10px]">{t('SIH PROTOTYPE', 'एसआईएच प्रोटोटाइप')}</span>
           </div>
         </div>
       </div>

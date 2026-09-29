@@ -2,13 +2,12 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import { Card, Button, Tooltip, Modal } from '../components/ui/UIComponents';
-import { useApp } from '../store/AppContext';
+import { useApp, useI18n } from '../store/AppContext';
 import { competencies } from '../data/mockData';
 import { getRoleRequirements, selectTestCompetencies } from '../services/appService';
 import { useStagger } from '../hooks/useStagger';
 import { Info, HelpCircle, PlayCircle, RefreshCw } from 'lucide-react';
 
-const levelLabels = ['Beginner', 'Basic', 'Intermediate', 'Advanced', 'Expert'];
 const categoryColors: Record<string, string> = {
   Statistical: 'bg-blue-50 border-blue-200',
   Technical: 'bg-purple-50 border-purple-200',
@@ -30,10 +29,19 @@ function testedAtAfterBreakdown(
 
 export default function CompetencyPage() {
   const { user, selectedRole, setSelectedRole } = useApp();
+  const { t } = useI18n();
   const { animate, staggerStyle } = useStagger();
   const navigate = useNavigate();
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [retakeOpen, setRetakeOpen] = useState(false);
+
+  const levelLabels = [
+    t('Beginner', 'शुरुआती'),
+    t('Basic', 'बुनियादी'),
+    t('Intermediate', 'मध्यवर्ती'),
+    t('Advanced', 'उन्नत'),
+    t('Expert', 'विशेषज्ञ'),
+  ];
 
   const scoreList = user?.competencies ?? [];
   const testMeta = user?.testMeta;
@@ -71,20 +79,22 @@ export default function CompetencyPage() {
 
   return (
     <div>
-      <Header title="Competency Assessment" />
+      <Header title={t('Competency Assessment', 'दक्षता मूल्यांकन')} />
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between stagger-fade-up" style={staggerStyle(0, animate)}>
           <div>
-            <p className="text-sm text-navy-400">Your proficiency snapshot based on the latest assessment</p>
+            <p className="text-sm text-navy-400">
+              {t('Your proficiency snapshot based on the latest assessment', 'नवीनतम मूल्यांकन के आधार पर आपका दक्षता सारांश')}
+            </p>
             {testMeta?.takenAt && breakdownIsCurrent && (
               <p className="mt-1 text-xs text-navy-400">
-                Last test: {new Date(testMeta.takenAt).toLocaleString()}
+                {t('Last test:', 'अंतिम परीक्षण:')} {new Date(testMeta.takenAt).toLocaleString()}
               </p>
             )}
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <label className="text-sm text-navy-600">Target Role:</label>
+              <label className="text-sm text-navy-600">{t('Target Role:', 'लक्ष्य पद:')}</label>
               <select
                 value={selectedRole}
                 onChange={e => setSelectedRole(e.target.value)}
@@ -100,7 +110,7 @@ export default function CompetencyPage() {
             {breakdownIsCurrent && (
               <Button variant="secondary" onClick={() => setBreakdownOpen(true)}>
                 <HelpCircle size={16} className="mr-1" />
-                View Question Breakdown
+                {t('View Question Breakdown', 'प्रश्न विश्लेषण देखें')}
               </Button>
             )}
             {canStartTest && (
@@ -112,11 +122,11 @@ export default function CompetencyPage() {
               >
                 {hasTestedResults ? (
                   <>
-                    <RefreshCw size={16} className="mr-1" /> Retake Test
+                    <RefreshCw size={16} className="mr-1" /> {t('Retake Test', 'परीक्षण पुनः दें')}
                   </>
                 ) : (
                   <>
-                    <PlayCircle size={16} className="mr-1" /> Start Assessment
+                    <PlayCircle size={16} className="mr-1" /> {t('Start Assessment', 'मूल्यांकन प्रारंभ करें')}
                   </>
                 )}
               </Button>
@@ -127,8 +137,10 @@ export default function CompetencyPage() {
         {Object.entries(grouped).map(([category, comps], i) => (
           <Card key={category} className="stagger-fade-up" style={staggerStyle(1 + i, animate)}>
             <div className="flex items-center gap-2 mb-4">
-              <h3 className="text-base font-semibold text-navy-800">{category} Competencies</h3>
-              <Tooltip text={`Competencies in the ${category} domain`}>
+              <h3 className="text-base font-semibold text-navy-800">
+                {category} {t('Competencies', 'दक्षताएँ')}
+              </h3>
+              <Tooltip text={t(`Competencies in the ${category} domain`, `${category} क्षेत्र की दक्षताएँ`)}>
                 <Info size={14} className="text-navy-400" />
               </Tooltip>
             </div>
@@ -144,11 +156,13 @@ export default function CompetencyPage() {
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-sm font-medium text-navy-800">{comp.name}</p>
                       <div className="flex items-center gap-1">
-                        <span className="text-[10px] px-1.5 py-0.5 bg-white/60 rounded text-navy-500">Req: Lv.{required}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 bg-white/60 rounded text-navy-500">
+                          {t('Req: Lv.', 'आवश्यक: स्तर')} {required}
+                        </span>
                         {tested ? (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-600 text-white">Tested</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-600 text-white">{t('Tested', 'परीक्षित')}</span>
                         ) : (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/70 text-navy-500">Not covered</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/70 text-navy-500">{t('Not covered', 'शामिल नहीं')}</span>
                         )}
                       </div>
                     </div>
@@ -171,11 +185,13 @@ export default function CompetencyPage() {
                       <div className="text-right">
                         <div className="text-xs text-navy-400">{levelLabels[level - 1] || '—'}</div>
                         {sc?.source === 'tested' && sc.accuracy !== undefined && (
-                          <div className="text-[10px] text-navy-400">{Math.round(sc.accuracy)}% accuracy</div>
+                          <div className="text-[10px] text-navy-400">
+                            {Math.round(sc.accuracy)}% {t('accuracy', 'सटीकता')}
+                          </div>
                         )}
                         {sc?.source === 'tested' && sc.selfRatedLevel && sc.selfRatedLevel !== level && (
                           <div className="text-[10px] text-amber-600">
-                            Self {sc.selfRatedLevel} → {level}
+                            {t('Self', 'स्वयं')} {sc.selfRatedLevel} → {level}
                           </div>
                         )}
                       </div>
@@ -190,27 +206,30 @@ export default function CompetencyPage() {
         <Modal
           open={retakeOpen}
           onClose={() => setRetakeOpen(false)}
-          title="Retake competency test?"
+          title={t('Retake competency test?', 'दक्षता परीक्षण पुनः दें?')}
           maxWidth="max-w-lg"
         >
           <p className="text-sm leading-relaxed text-navy-600">
-            This will run a fresh test covering the {focusCount} highest-priority competencies
-            for <span className="font-semibold">{selectedRole}</span>.
+            {t('This will run a fresh test covering the', 'यह एक नया परीक्षण चलाएगा जिसमें')}
+            {` ${focusCount} `}
+            {t('highest-priority competencies for', 'सर्वाधिक प्राथमिकता वाली दक्षताएँ शामिल होंगी —')}
+            <span className="font-semibold">{selectedRole}</span>.
           </p>
           <div className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800">
-            <div className="font-semibold">What changes</div>
+            <div className="font-semibold">{t('What changes', 'क्या बदलेगा')}</div>
             <ul className="mt-1.5 space-y-1 list-disc pl-4">
-              <li>The {focusCount} tested competencies get new levels from your answers.</li>
-              <li>Your previous question breakdown is replaced by this attempt.</li>
               <li>
-                The other {scoreList.length - focusCount} competencies keep their current level and
-                stay marked as not covered by a test.
+                {t(`The ${focusCount} tested competencies get new levels from your answers.`, `${focusCount} परीक्षित दक्षताओं के नए स्तर आपके उत्तरों से निर्धारित होंगे।`)}
+              </li>
+              <li>{t('Your previous question breakdown is replaced by this attempt.', 'आपका पिछला प्रश्न विश्लेषण इस प्रयास से प्रतिस्थापित हो जाएगा।')}</li>
+              <li>
+                {t(`The other ${scoreList.length - focusCount} competencies keep their current level and stay marked as not covered by a test.`, `शेष ${scoreList.length - focusCount} दक्षताएँ अपना वर्तमान स्तर बनाए रखेंगी और परीक्षण में शामिल नहीं के रूप में चिह्नित रहेंगी।`)}
               </li>
             </ul>
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setRetakeOpen(false)}>
-              Cancel
+              {t('Cancel', 'रद्द करें')}
             </Button>
             <Button
               onClick={() => {
@@ -218,7 +237,7 @@ export default function CompetencyPage() {
                 navigate('/competency-test');
               }}
             >
-              Start retake
+              {t('Start retake', 'पुनः प्रारंभ करें')}
             </Button>
           </div>
         </Modal>
@@ -226,12 +245,14 @@ export default function CompetencyPage() {
         <Modal
           open={breakdownOpen}
           onClose={() => setBreakdownOpen(false)}
-          title="Test Question Breakdown"
+          title={t('Test Question Breakdown', 'परीक्षण प्रश्न विश्लेषण')}
           maxWidth="max-w-5xl"
         >
           <div className="space-y-6 max-h-[70vh] overflow-auto pr-1">
             {questionRecords.length === 0 ? (
-              <p className="text-sm text-navy-400">No question breakdown available for the latest test.</p>
+              <p className="text-sm text-navy-400">
+                {t('No question breakdown available for the latest test.', 'नवीनतम परीक्षण के लिए कोई प्रश्न विश्लेषण उपलब्ध नहीं है।')}
+              </p>
             ) : (
               questionRecords.map(q => {
                 const correct = q.chosenIndex !== null && q.chosenIndex === q.correctIndex;
@@ -240,7 +261,7 @@ export default function CompetencyPage() {
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <div className="text-xs uppercase tracking-wide text-navy-400">
-                          Q{q.position + 1} · {q.competencyName}
+                          {t('Q', 'प्रश्न')} {q.position + 1} · {q.competencyName}
                         </div>
                         <h4 className="mt-1 text-sm font-semibold text-navy-900">{q.prompt}</h4>
                       </div>
@@ -249,7 +270,7 @@ export default function CompetencyPage() {
                           correct ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
                         }`}
                       >
-                        {correct ? 'Correct' : 'Incorrect'}
+                        {correct ? t('Correct', 'सही') : t('Incorrect', 'ग़लत')}
                       </span>
                     </div>
                     <div className="mt-3 space-y-2">
@@ -269,9 +290,9 @@ export default function CompetencyPage() {
                           >
                             <span className="text-xs font-semibold text-navy-400">{String.fromCharCode(65 + oi)}</span>
                             <span className="text-navy-700">{opt}</span>
-                            {isCorrect && <span className="ml-auto text-xs font-medium text-green-700">Correct</span>}
+                            {isCorrect && <span className="ml-auto text-xs font-medium text-green-700">{t('Correct', 'सही')}</span>}
                             {chosen && !isCorrect && (
-                              <span className="ml-auto text-xs font-medium text-amber-700">Your answer</span>
+                              <span className="ml-auto text-xs font-medium text-amber-700">{t('Your answer', 'आपका उत्तर')}</span>
                             )}
                           </div>
                         );
@@ -283,7 +304,7 @@ export default function CompetencyPage() {
                       </p>
                     )}
                     <div className="mt-2 text-xs text-navy-400">
-                      Difficulty: {q.difficulty}
+                      {t('Difficulty:', 'कठिनाई:')} {q.difficulty}
                     </div>
                   </div>
                 );

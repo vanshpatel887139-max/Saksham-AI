@@ -1,6 +1,6 @@
 import Header from '../components/layout/Header';
 import { Card, Badge, ProgressBar, Button } from '../components/ui/UIComponents';
-import { useApp } from '../store/AppContext';
+import { useApp, useI18n } from '../store/AppContext';
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } from 'recharts';
 import { BookOpen, Clock, Brain, Target, TrendingUp, Flame, ChevronRight, Bell } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -11,6 +11,7 @@ import { mockActivities } from '../services/appService';
 export default function DashboardPage() {
   const { animate, staggerStyle } = useStagger();
   const { user, skillGaps, enrolledCourses, quizzes, activities, notifications, recommendedCourses, dashboard, dataLoading } = useApp();
+  const { t } = useI18n();
   const navigate = useNavigate();
 
   if (!user) return null;
@@ -35,13 +36,13 @@ export default function DashboardPage() {
   const learningHours = dashboard ? `${dashboard.learningHours}` : '—';
   const quizAverageLabel = quizAverage === null ? '—' : `${quizAverage}%`;
   const hoursSubtitle = dashboard && dashboard.activeDayCount > 0
-    ? `Across ${dashboard.activeDayCount} active day${dashboard.activeDayCount === 1 ? '' : 's'}`
-    : 'No activity recorded yet';
+    ? `${t('Across', 'कुल')} ${dashboard.activeDayCount} ${dashboard.activeDayCount === 1 ? t('active day', 'सक्रिय दिन') : t('active days', 'सक्रिय दिन')}`
+    : t('No activity recorded yet', 'अभी तक कोई गतिविधि दर्ज नहीं');
 
   const streakLabel = dashboard
     ? dashboard.streak > 0
-      ? `${dashboard.streak} day${dashboard.streak === 1 ? '' : 's'}`
-      : '0 days'
+      ? `${dashboard.streak} ${dashboard.streak === 1 ? t('day', 'दिन') : t('days', 'दिन')}`
+      : t('0 days', '0 दिन')
     : '—';
 
   // Distinguishes "you have a 0-day streak" from "your last activity was long
@@ -50,10 +51,10 @@ export default function DashboardPage() {
   const streakSubtitle = !dashboard
     ? '—'
     : dashboard.streak > 0
-      ? 'Consecutive active days'
+      ? t('Consecutive active days', 'लगातार सक्रिय दिन')
       : dashboard.streakAsOf
-        ? `Last active ${dashboard.streakAsOf}`
-        : 'No activity recorded yet';
+        ? `${t('Last active', 'अंतिम सक्रियता')} ${dashboard.streakAsOf}`
+        : t('No activity recorded yet', 'अभी तक कोई गतिविधि दर्ज नहीं');
 
   // An empty feed is a worse failure than a slightly stale one, but showing
   // seeded rows as if they were the learner's own would be a lie. Only fall
@@ -88,24 +89,24 @@ export default function DashboardPage() {
   });
 
   const statCards = [
-    { icon: Target, label: 'Overall Competency', value: `${overallScore}/5`, sub: `${user.competencies.length} competencies`, color: 'text-navy-600', bg: 'bg-navy-50' },
-    { icon: BookOpen, label: 'Courses In Progress', value: enrolledCourses.length, sub: `${completedCourses} completed`, color: 'text-saffron-600', bg: 'bg-saffron-50' },
-    { icon: Clock, label: 'Learning Hours', value: learningHours, sub: hoursSubtitle, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { icon: Brain, label: 'Quiz Average', value: quizAverageLabel, sub: quizAverage === null ? 'No quizzes taken yet' : `${dashboard?.quizzes.count ?? quizzes.length} attempt${(dashboard?.quizzes.count ?? quizzes.length) === 1 ? '' : 's'}`, color: 'text-purple-600', bg: 'bg-purple-50' },
-    { icon: Flame, label: 'Learning Streak', value: streakLabel, sub: streakSubtitle, color: 'text-red-600', bg: 'bg-red-50' },
-    { icon: TrendingUp, label: 'Skill Gaps', value: highGaps, color: 'text-amber-600', bg: 'bg-amber-50' },
+    { icon: Target, label: t('Overall Competency', 'समग्र दक्षता'), value: `${overallScore}/5`, sub: `${user.competencies.length} ${t('competencies', 'दक्षताएँ')}`, color: 'text-navy-600', bg: 'bg-navy-50' },
+    { icon: BookOpen, label: t('Courses In Progress', 'प्रगति पर चल रहे पाठ्यक्रम'), value: enrolledCourses.length, sub: `${completedCourses} ${t('completed', 'पूर्ण')}`, color: 'text-saffron-600', bg: 'bg-saffron-50' },
+    { icon: Clock, label: t('Learning Hours', 'अध्ययन घंटे'), value: learningHours, sub: hoursSubtitle, color: 'text-blue-600', bg: 'bg-blue-50' },
+    { icon: Brain, label: t('Quiz Average', 'क्विज़ औसत'), value: quizAverageLabel, sub: quizAverage === null ? t('No quizzes taken yet', 'अभी तक कोई क्विज़ नहीं दी गई है') : `${dashboard?.quizzes.count ?? quizzes.length} ${(dashboard?.quizzes.count ?? quizzes.length) === 1 ? t('attempt', 'प्रयास') : t('attempts', 'प्रयास')}`, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { icon: Flame, label: t('Learning Streak', 'अध्ययन स्ट्रीक'), value: streakLabel, sub: streakSubtitle, color: 'text-red-600', bg: 'bg-red-50' },
+    { icon: TrendingUp, label: t('Skill Gaps', 'कौशल अंतर'), value: highGaps, color: 'text-amber-600', bg: 'bg-amber-50' },
   ];
 
   return (
     <div>
-      <Header title="Dashboard" />
+      <Header title={t('Dashboard', 'डैशबोर्ड')} />
       <div className="p-6 space-y-6">
         <div className="stagger-fade-up" style={staggerStyle(0, animate)}>
           <div className="bg-gradient-to-r from-navy-800 to-navy-900 rounded-2xl p-6 text-white">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-bold mb-1">Welcome back, {user.name.split(' ')[0]}!</h2>
-                <p className="text-navy-200 text-sm">Your personalized learning dashboard for Official Statistics</p>
+                <h2 className="text-xl font-bold mb-1">{t('Welcome back,', 'पुनः स्वागत है,')} {user.name.split(' ')[0]}!</h2>
+                <p className="text-navy-200 text-sm">{t('Your personalized learning dashboard for Official Statistics', 'आधिकारिक सांख्यिकी हेतु आपका व्यक्तिगत अध्ययन डैशबोर्ड')}</p>
               </div>
               <div className="w-12 h-12 rounded-full bg-saffron-500 flex items-center justify-center font-bold text-lg">
                 {user.name.split(' ').map(n => n[0]).join('')}
@@ -140,7 +141,7 @@ export default function DashboardPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-1 h-full stagger-fade-up" style={staggerStyle(7, animate)}>
-            <h3 className="text-sm font-semibold text-navy-800 mb-3">Competency Overview</h3>
+            <h3 className="text-sm font-semibold text-navy-800 mb-3">{t('Competency Overview', 'दक्षता अवलोकन')}</h3>
             <ResponsiveContainer width="100%" height={250}>
               <RadarChart data={radarData}>
                 <PolarGrid stroke="#d9e1ed" />
@@ -152,7 +153,7 @@ export default function DashboardPage() {
           </Card>
 
           <Card className="lg:col-span-1 h-full stagger-fade-up" style={staggerStyle(8, animate)}>
-            <h3 className="text-sm font-semibold text-navy-800 mb-3">Recommended Next Course</h3>
+            <h3 className="text-sm font-semibold text-navy-800 mb-3">{t('Recommended Next Course', 'अगला अनुशंसित पाठ्यक्रम')}</h3>
             {dataLoading ? (
               <div className="space-y-3 animate-pulse">
                 {[0, 1].map(i => (
@@ -176,17 +177,17 @@ export default function DashboardPage() {
                     </div>
                     <p className="text-sm font-medium text-navy-800">{c.title}</p>
                     <p className="text-xs text-navy-400 mt-1">{c.duration} • {c.difficulty}</p>
-                    <Button size="sm" className="mt-2 w-full" onClick={() => navigate(`/courses/${c.id}`)}>Enroll Now</Button>
+                    <Button size="sm" className="mt-2 w-full" onClick={() => navigate(`/courses/${c.id}`)}>{t('Enroll Now', 'अभी नामांकन करें')}</Button>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-navy-400">Complete your assessment to get recommendations</p>
+              <p className="text-sm text-navy-400">{t('Complete your assessment to get recommendations', 'अनुशंसाएँ प्राप्त करने हेतु अपना मूल्यांकन पूरा करें')}</p>
             )}
           </Card>
 
           <Card className="lg:col-span-1 h-full stagger-fade-up" style={staggerStyle(9, animate)}>
-            <h3 className="text-sm font-semibold text-navy-800 mb-3">Recent Activity</h3>
+            <h3 className="text-sm font-semibold text-navy-800 mb-3">{t('Recent Activity', 'हाल की गतिविधियाँ')}</h3>
             {feedLoading ? (
               <div className="space-y-3 animate-pulse">
                 {[0, 1, 2].map(i => (
@@ -200,7 +201,7 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : activityFeed.length === 0 ? (
-                <p className="text-sm text-navy-400">No activity yet. Enroll in a course or take an assessment to get started.</p>
+                <p className="text-sm text-navy-400">{t('No activity yet. Enroll in a course or take an assessment to get started.', 'अभी तक कोई गतिविधि नहीं। शुरू करने हेतु किसी पाठ्यक्रम में नामांकन करें या मूल्यांकन दें।')}</p>
               ) : activityFeed.slice(0, 5).map(a => (
                 <div key={a.id} className="flex items-start gap-3">
                   <span className="text-sm">{a.icon}</span>
@@ -215,7 +216,7 @@ export default function DashboardPage() {
         </div>
 
         <Card className="stagger-fade-up" style={staggerStyle(10, animate)}>
-          <h3 className="text-sm font-semibold text-navy-800 mb-4">Enrolled Courses Progress</h3>
+          <h3 className="text-sm font-semibold text-navy-800 mb-4">{t('Enrolled Courses Progress', 'नामांकित पाठ्यक्रमों की प्रगति')}</h3>
           {dataLoading ? (
             <div className="space-y-4 animate-pulse">
               {[0, 1, 2].map(i => (
@@ -247,21 +248,21 @@ export default function DashboardPage() {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-navy-400 text-center py-4">No courses enrolled yet. Visit the Course Catalogue to get started.</p>
+            <p className="text-sm text-navy-400 text-center py-4">{t('No courses enrolled yet. Visit the Course Catalogue to get started.', 'अभी तक किसी पाठ्यक्रम में नामांकन नहीं किया गया। शुरू करने हेतु पाठ्यक्रम सूची देखें।')}</p>
           )}
         </Card>
 
         <Card className="stagger-fade-up" style={staggerStyle(11, animate)}>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-navy-800">Learning Pathway</h3>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/learning-path')}>View Full Path <ChevronRight size={14} /></Button>
+            <h3 className="text-sm font-semibold text-navy-800">{t('Learning Pathway', 'अध्ययन मार्ग')}</h3>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/learning-path')}>{t('View Full Path', 'पूरा मार्ग देखें')} <ChevronRight size={14} /></Button>
           </div>
           {/* Was a hardcoded 33/0/0. Now each bar is the share of that band's
               competencies already meeting the target role's required level. */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {pathwayStages.length === 0 ? (
               <p className="text-sm text-navy-400">
-                {dashboard ? 'Set a target role to see your pathway progress.' : 'Loading your pathway…'}
+                {dashboard ? t('Set a target role to see your pathway progress.', 'अपना मार्ग प्रगति देखने हेतु लक्ष्य भूमिका निर्धारित करें।') : t('Loading your pathway…', 'आपका मार्ग लोड किया जा रहा है…')}
               </p>
             ) : pathwayStages.map(s => (
               <div key={s.stage} className="p-4 bg-navy-50 rounded-lg">
@@ -271,13 +272,13 @@ export default function DashboardPage() {
                 </div>
                 <ProgressBar value={s.progress} max={100} size="sm" />
                 <p className="text-xs text-navy-400 mt-1.5">
-                  {s.total > 0 ? `${s.met}/${s.total} competencies` : 'No competencies at this level for your target role'}
+                  {s.total > 0 ? `${s.met}/${s.total} ${t('competencies', 'दक्षताएँ')}` : t('No competencies at this level for your target role', 'आपकी लक्ष्य भूमिका हेतु इस स्तर पर कोई दक्षता नहीं है')}
                 </p>
               </div>
             ))}
           </div>
           {dashboard?.targetRole && (
-            <p className="text-xs text-navy-400 mt-3">Measured against the requirements for {dashboard.targetRole}.</p>
+            <p className="text-xs text-navy-400 mt-3">{t('Measured against the requirements for', 'इसके लिए आवश्यकताओं के अनुसार मापा गया:')} {dashboard.targetRole}.</p>
           )}
         </Card>
       </div>

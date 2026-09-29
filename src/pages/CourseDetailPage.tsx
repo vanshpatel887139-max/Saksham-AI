@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import Header from '../components/layout/Header';
 import { Card, Button, Badge, ProgressBar, EmptyState } from '../components/ui/UIComponents';
 import CodeRunner from '../components/CodeRunner';
-import { useApp } from '../store/AppContext';
+import { useApp, useI18n } from '../store/AppContext';
 import { apiGetCourseDetail } from '../services/api';
 import { Course, CourseModule } from '../types';
 import { ArrowLeft, Clock, Star, Play, CheckCircle2, BookOpen, Bot, ChevronRight, Code2 } from 'lucide-react';
@@ -12,6 +12,7 @@ export default function CourseDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user, completeModule, enrollInCourse, skillGaps } = useApp();
+  const { t } = useI18n();
   const [course, setCourse] = useState<Course | null>(null);
   const [activeModule, setActiveModule] = useState<CourseModule | null>(null);
   const [answers, setAnswers] = useState<(number | null)[]>([]);
@@ -29,8 +30,8 @@ export default function CourseDetailPage() {
     }
   }, [id, user]);
 
-  if (loading) return <div><Header title="Course" /><div className="p-6">Loading course...</div></div>;
-  if (!course) return <div><Header title="Course" /><div className="p-6"><EmptyState icon="📭" title="Course not found" description="The course you are looking for does not exist." /></div></div>;
+  if (loading) return <div><Header title={t('Course', 'कोर्स')} /><div className="p-6">{t('Loading course...', 'कोर्स लोड हो रहा है...')}</div></div>;
+  if (!course) return <div><Header title={t('Course', 'कोर्स')} /><div className="p-6"><EmptyState icon="📭" title={t('Course not found', 'कोर्स नहीं मिला')} description={t('The course you are looking for does not exist.', 'आप जिस कोर्स की तलाश कर रहे हैं, वह मौजूद नहीं है।')} /></div></div>;
 
   const enrolled = course.enrolled || false;
   const modules = course.modules || [];
@@ -45,9 +46,9 @@ export default function CourseDetailPage() {
 
   const isQuiz = activeModule?.type === 'quiz';
   const microQuestions = [
-    { q: `What is the main takeaway of "${activeModule?.title}"?`, o: ['It aligns with official statistics practice', 'It is only about theory', 'It replaces all other methods', 'It has no practical value'], c: 0 },
-    { q: `How does understanding "${activeModule?.title}" support your target role?`, o: ['By strengthening relevant competencies', 'It does not matter', 'By reducing responsibilities', 'By skipping assessments'], c: 0 },
-    { q: `Which competency does "${activeModule?.title}" most directly build?`, o: ['The one linked to this course', 'Unrelated soft skills', 'Technical only', 'None of these'], c: 0 },
+    { q: `${t('What is the main takeaway of', 'का मुख्य निष्कर्ष क्या है')} "${activeModule?.title}"?`, o: [t('It aligns with official statistics practice', 'यह आधिकारिक सांख्यिकी कार्यप्रणाली के अनुरूप है'), t('It is only about theory', 'यह केवल सिद्धांत तक सीमित है'), t('It replaces all other methods', 'यह अन्य सभी विधियों का स्थान लेता है'), t('It has no practical value', 'इसमें कोई व्यावहारिक मूल्य नहीं है')], c: 0 },
+    { q: `${t('How does understanding', 'को समझना')} "${activeModule?.title}" ${t('support your target role?', 'आपके लक्षित पद में किस प्रकार सहायक है?')}`, o: [t('By strengthening relevant competencies', 'संबंधित दक्षताओं को मजबूत बनाकर'), t('It does not matter', 'इससे कोई फर्क नहीं पड़ता'), t('By reducing responsibilities', 'ज़िम्मेदारियाँ घटाकर'), t('By skipping assessments', 'आकलनों को छोड़कर')], c: 0 },
+    { q: `${t('Which competency does', 'कौन सी दक्षता')} "${activeModule?.title}" ${t('most directly build?', 'सबसे सीधे विकसित करता है?')}`, o: [t('The one linked to this course', 'इस कोर्स से जुड़ी दक्षता'), t('Unrelated soft skills', 'असंबंधित सॉफ़्ट स्किल्स'), t('Technical only', 'केवल तकनीकी कौशल'), t('None of these', 'इनमें से कोई नहीं')], c: 0 },
   ];
 
   const handleAnswer = (idx: number, opt: number) => {
@@ -61,11 +62,11 @@ export default function CourseDetailPage() {
     setSubmitted(true);
     const result = await completeModule(course.id, activeModule.title, sc);
     if (result.bumped && result.bumped.length > 0) {
-      setBumpNotice(`🎉 Course complete! ${result.bumped.map(b => `${b.name}: Level ${b.before} → ${b.after}`).join(', ')}`);
+      setBumpNotice(`${t('🎉 Course complete!', '🎉 कोर्स पूरा हुआ!')} ${result.bumped.map(b => `${b.name}: ${t('Level', 'स्तर')} ${b.before} → ${b.after}`).join(', ')}`);
     } else if (result.courseComplete) {
-      setBumpNotice('🏆 You completed all modules of this course!');
+      setBumpNotice(t('🏆 You completed all modules of this course!', '🏆 आपने इस कोर्स के सभी मॉड्यूल पूरे कर लिए हैं!'));
     } else {
-      setBumpNotice(`✅ Module completed. Course progress is now ${result.progress}%.`);
+      setBumpNotice(`${t('✅ Module completed.', '✅ मॉड्यूल पूरा हुआ।')} ${t('Course progress is now', 'कोर्स की प्रगति अब है')} ${result.progress}%.`);
     }
   };
 
@@ -75,11 +76,11 @@ export default function CourseDetailPage() {
     setSubmitted(true);
     setScore(0);
     if (result.bumped && result.bumped.length > 0) {
-      setBumpNotice(`🎉 Course complete! ${result.bumped.map(b => `${b.name}: Level ${b.before} → ${b.after}`).join(', ')}`);
+      setBumpNotice(`${t('🎉 Course complete!', '🎉 कोर्स पूरा हुआ!')} ${result.bumped.map(b => `${b.name}: ${t('Level', 'स्तर')} ${b.before} → ${b.after}`).join(', ')}`);
     } else if (result.courseComplete) {
-      setBumpNotice('🏆 You completed all modules of this course!');
+      setBumpNotice(t('🏆 You completed all modules of this course!', '🏆 आपने इस कोर्स के सभी मॉड्यूल पूरे कर लिए हैं!'));
     } else {
-      setBumpNotice(`✅ Module completed. Course progress is now ${result.progress}%.`);
+      setBumpNotice(`${t('✅ Module completed.', '✅ मॉड्यूल पूरा हुआ।')} ${t('Course progress is now', 'कोर्स की प्रगति अब है')} ${result.progress}%.`);
     }
   };
 
@@ -90,7 +91,7 @@ export default function CourseDetailPage() {
       <Header title={course.title} />
       <div className="p-6 space-y-6">
         <button onClick={() => navigate('/courses')} className="flex items-center gap-1 text-sm text-navy-500 hover:text-navy-800 cursor-pointer">
-          <ArrowLeft size={16} /> Back to Course Catalogue
+          <ArrowLeft size={16} /> {t('Back to Course Catalogue', 'कोर्स सूची पर वापस जाएँ')}
         </button>
 
         <div className="bg-gradient-to-r from-navy-800 to-navy-900 rounded-2xl p-6 text-white">
@@ -108,22 +109,22 @@ export default function CourseDetailPage() {
                   <span className="flex items-center gap-1"><Clock size={12} /> {course.duration}</span>
                   <span className="flex items-center gap-1"><Star size={12} className="text-amber-400" /> {course.rating}</span>
                   <span>{course.language}</span>
-                  <span>{modules.length} modules</span>
+                  <span>{modules.length} {t('modules', 'मॉड्यूल')}</span>
                 </div>
                 {reasonCount > 0 && (
                   <div className="mt-2 px-2 py-1 bg-saffron-500/20 border border-saffron-500/30 rounded text-[11px] text-saffron-200">
-                    Recommended — addresses {reasonCount} of your current skill gap{reasonCount > 1 ? 's' : ''}
+                    {t('Recommended — addresses', 'सिफ़ारिश —')} {reasonCount} {reasonCount > 1 ? t('of your current skill gaps', 'आपके वर्तमान स्किल गैपों में से') : t('of your current skill gap', 'आपके वर्तमान स्किल गैप में से')}
                   </div>
                 )}
               </div>
             </div>
             {!enrolled ? (
               <Button onClick={() => { enrollInCourse(course.id); setCourse({ ...course, enrolled: true }); }}>
-                <BookOpen size={16} className="mr-1" /> Enroll Now
+                <BookOpen size={16} className="mr-1" /> {t('Enroll Now', 'अभी पंजीकरण करें')}
               </Button>
             ) : (
               <div className="w-40">
-                <div className="flex justify-between text-xs mb-1"><span>Progress</span><span>{course.progress}%</span></div>
+                <div className="flex justify-between text-xs mb-1"><span>{t('Progress', 'प्रगति')}</span><span>{course.progress}%</span></div>
                 <ProgressBar value={course.progress} max={100} size="sm" showLabel={false} />
               </div>
             )}
@@ -132,7 +133,7 @@ export default function CourseDetailPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-1">
-            <h3 className="text-sm font-semibold text-navy-800 mb-4">Course Modules</h3>
+            <h3 className="text-sm font-semibold text-navy-800 mb-4">{t('Course Modules', 'कोर्स मॉड्यूल')}</h3>
             <div className="space-y-2">
               {modules.map((m, i) => (
                 <button
@@ -157,16 +158,16 @@ export default function CourseDetailPage() {
           <Card className="lg:col-span-2">
             {!activeModule ? (
               <>
-                <h3 className="text-sm font-semibold text-navy-800 mb-3">About this course</h3>
+                <h3 className="text-sm font-semibold text-navy-800 mb-3">{t('About this course', 'इस कोर्स के बारे में')}</h3>
                 <p className="text-sm text-navy-600 mb-4">{course.description}</p>
-                <h4 className="text-sm font-medium text-navy-700 mb-2">Skills covered</h4>
+                <h4 className="text-sm font-medium text-navy-700 mb-2">{t('Skills covered', 'शामिल किए गए कौशल')}</h4>
                 <div className="flex flex-wrap gap-2">
                   {course.skillsCovered.map(s => (
                     <span key={s} className="px-3 py-1 bg-navy-50 text-navy-700 rounded-full text-xs">{s}</span>
                   ))}
                 </div>
                 <div className="mt-6 bg-saffron-50 border border-saffron-200 rounded-xl p-4 text-sm text-navy-700">
-                  Select a module on the left to begin. Complete every module to boost the linked competencies on your profile (+1 level, up to max 5). Quiz modules include a brief micro-assessment.
+                  {t("Select a module on the left to begin. Complete every module to boost the linked competencies on your profile (+1 level, up to max 5). Quiz modules include a brief micro-assessment.", 'शुरू करने के लिए बाईं ओर एक मॉड्यूल चुनें। आपकी प्रोफ़ाइल से जुड़ी दक्षताओं को बढ़ाने के लिए हर मॉड्यूल पूरा करें (+1 स्तर, अधिकतम 5 तक)। क्विज़ मॉड्यूल में एक संक्षिप्त सूक्ष्म-आकलन शामिल होता है।')}
                 </div>
               </>
             ) : (
@@ -174,9 +175,9 @@ export default function CourseDetailPage() {
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="text-base font-semibold text-navy-800">{activeModule.title}</h3>
-                    <p className="text-xs text-navy-400">{activeModule.duration} • {activeModule.type} module</p>
+                    <p className="text-xs text-navy-400">{activeModule.duration} • {activeModule.type} {t('module', 'मॉड्यूल')}</p>
                   </div>
-                  <Badge variant={activeModule.completed ? 'success' : 'default'}>{activeModule.completed ? 'Completed' : 'In progress'}</Badge>
+                  <Badge variant={activeModule.completed ? 'success' : 'default'}>{activeModule.completed ? t('Completed', 'पूर्ण') : t('In progress', 'प्रगति में')}</Badge>
                 </div>
 
                 <p className="text-sm text-navy-600 bg-navy-50 rounded-lg p-4 mb-4">{activeModule.summary}</p>
@@ -185,7 +186,7 @@ export default function CourseDetailPage() {
                   <div className="mb-4">
                     <div className="flex items-center gap-2 mb-2">
                       <Code2 size={14} className="text-saffron-500" />
-                      <p className="text-xs font-medium text-navy-700 uppercase tracking-wide">Sandbox — run and edit this module's example code</p>
+                      <p className="text-xs font-medium text-navy-700 uppercase tracking-wide">{t("Sandbox — run and edit this module's example code", 'सैंडबॉक्स — इस मॉड्यूल का उदाहरण कोड चलाएँ और संपादित करें')}</p>
                     </div>
                     <CodeRunner initialCode={activeModule.code} engine={activeModule.sandbox === 'sql' ? 'sql' : 'python'} />
                   </div>
@@ -207,26 +208,26 @@ export default function CourseDetailPage() {
                       </div>
                     ))}
                     <Button onClick={submitAssessment} disabled={answers.some(a => a === null)} className="w-full">
-                      Submit Micro-Assessment
+                      {t('Submit Micro-Assessment', 'सूक्ष्म-आकलन जमा करें')}
                     </Button>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div className={`rounded-xl p-4 text-sm ${submitted ? (score >= 2 ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700') : 'bg-navy-50 text-navy-600'}`}>
                       {submitted
-                        ? <>You scored <b>{score}/3</b> on the micro-assessment{isQuiz ? `. Completing the assessment records the attempt on your transcript.` : ''}</>
-                        : 'Review this module content. For quiz modules, answer the micro-assessment to complete it.'}
+                        ? <>{t('You scored', 'आपके अंक हैं')} <b>{score}/3</b> {t('on the micro-assessment', 'सूक्ष्म-आकलन में')}{isQuiz ? t('. Completing the assessment records the attempt on your transcript.', '। आकलन पूरा करने पर यह प्रयास आपकी ट्रांसक्रिप्ट में दर्ज हो जाता है।') : ''}</>
+                        : t('Review this module content. For quiz modules, answer the micro-assessment to complete it.', 'इस मॉड्यूल की सामग्री देखें। क्विज़ मॉड्यूल के लिए इसे पूरा करने हेतु सूक्ष्म-आकलन के उत्तर दें।')}
                     </div>
                     {bumpNotice && <div className="bg-saffron-50 border border-saffron-200 rounded-xl p-4 text-sm font-medium text-saffron-800">{bumpNotice}</div>}
                     {isQuiz && !submitted && answers.every(a => a !== null) && (
-                      <Button onClick={submitAssessment} className="w-full">Submit Micro-Assessment</Button>
+                      <Button onClick={submitAssessment} className="w-full">{t('Submit Micro-Assessment', 'सूक्ष्म-आकलन जमा करें')}</Button>
                     )}
                     {!isQuiz && !submitted && (
-                      <Button onClick={markComplete} className="w-full">Mark Module Complete</Button>
+                      <Button onClick={markComplete} className="w-full">{t('Mark Module Complete', 'मॉड्यूल को पूर्ण चिह्नित करें')}</Button>
                     )}
                     {activeModule.completed && (
                       <Button variant="secondary" onClick={() => startModule(modules[modules.indexOf(activeModule) + 1] || activeModule)} className="w-full">
-                        Go to Next Module <ChevronRight size={16} />
+                        {t('Go to Next Module', 'अगले मॉड्यूल पर जाएँ')} <ChevronRight size={16} />
                       </Button>
                     )}
                   </div>

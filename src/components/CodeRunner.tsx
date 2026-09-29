@@ -5,6 +5,7 @@ import { apiRunPython } from '../services/api';
 import { interpretPython } from '../services/pythonEngine';
 import { runSQL, Row } from '../services/sqlEngine';
 import { PythonRunResult } from '../types';
+import { useI18n } from '../store/AppContext';
 
 interface CodeRunnerProps {
   initialCode: string;
@@ -15,6 +16,7 @@ interface CodeRunnerProps {
 const PY_DEFAULT = "ages = [28, 34, 29, 41, 36]\ntotal = 0\nfor a in ages:\n    total += a\nprint('Count:', len(ages))\nprint('Sum:', total)\nprint('Mean age:', round(total / len(ages), 2))";
 
 export default function CodeRunner({ initialCode, presets, engine = 'python' }: CodeRunnerProps) {
+  const { t } = useI18n();
   const [code, setCode] = useState(initialCode || (engine === 'sql' ? 'SELECT name, literacy FROM districts WHERE literacy > 75 ORDER BY literacy DESC' : PY_DEFAULT));
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ output?: string; error?: string; ok: boolean; durationMs?: number } | null>(null);
@@ -22,7 +24,7 @@ export default function CodeRunner({ initialCode, presets, engine = 'python' }: 
 
   const run = async () => {
     if (!code.trim()) {
-      setResult({ ok: false, error: 'Please enter some code to run.', output: '' });
+      setResult({ ok: false, error: t('Please enter some code to run.', 'चलाने हेतु कुछ कोड दर्ज करें।'), output: '' });
       setSql(null);
       return;
     }
@@ -41,7 +43,7 @@ export default function CodeRunner({ initialCode, presets, engine = 'python' }: 
       } else {
         const r = runSQL(code);
         setSql(r);
-        setResult(r.ok ? { ok: true, output: `${r.rows.length} row(s) returned` } : { ok: false, error: `SQL Error: ${r.message}` });
+        setResult(r.ok ? { ok: true, output: `${r.rows.length} ${t('row(s) returned', 'पंक्ति(ें) लौटाई गईं')}` } : { ok: false, error: `${t('SQL Error', 'SQL त्रुटि')}: ${r.message}` });
       }
     } finally {
       setRunning(false);
@@ -51,14 +53,14 @@ export default function CodeRunner({ initialCode, presets, engine = 'python' }: 
   return (
     <div className="rounded-xl border border-navy-100 bg-white overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 bg-navy-800">
-        <p className="text-xs font-medium text-navy-200">{engine === 'python' ? '🐍 Python Runner' : '🗃️ SQL Runner'}</p>
+        <p className="text-xs font-medium text-navy-200">{engine === 'python' ? t('🐍 Python Runner', '🐍 Python रनर') : t('🗃️ SQL Runner', '🗃️ SQL रनर')}</p>
         {result?.ok && (
           <span className="inline-flex items-center gap-1 text-[10px] text-green-300 font-medium">
-            <CheckCircle2 size={11} /> Executed OK{result.durationMs ? ` · ${result.durationMs} ms` : ''}
+            <CheckCircle2 size={11} /> {t('Executed OK', 'सफलतापूर्वक निष्पादित')}{result.durationMs ? ` · ${result.durationMs} ms` : ''}
           </span>
         )}
         {result && !result.ok && (
-          <span className="inline-flex items-center gap-1 text-[10px] text-red-300 font-medium"><XCircle size={11} /> Failed</span>
+          <span className="inline-flex items-center gap-1 text-[10px] text-red-300 font-medium"><XCircle size={11} /> {t('Failed', 'विफल')}</span>
         )}
       </div>
 
@@ -79,10 +81,10 @@ export default function CodeRunner({ initialCode, presets, engine = 'python' }: 
             className="w-full h-56 bg-navy-900 text-green-300 font-mono text-xs p-4 rounded-lg outline-none resize-none" />
           <div className="flex items-center gap-2 mt-2">
             <Button size="sm" onClick={run} disabled={running}>
-              {running ? <><Loader2 size={14} className="mr-1 animate-spin" /> Running…</> : <><Play size={14} className="mr-1" /> Run</>}
+              {running ? <><Loader2 size={14} className="mr-1 animate-spin" /> {t('Running…', 'चल रहा है…')}</> : <><Play size={14} className="mr-1" /> {t('Run', 'चलाएँ')}</>}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => { setCode(initialCode || ''); setResult(null); setSql(null); }}>
-              <RotateCcw size={13} className="mr-1" /> Clear
+              <RotateCcw size={13} className="mr-1" /> {t('Clear', 'साफ़ करें')}
             </Button>
           </div>
         </div>
@@ -103,7 +105,7 @@ export default function CodeRunner({ initialCode, presets, engine = 'python' }: 
             <div className={`h-56 w-full rounded-lg font-mono text-xs p-4 overflow-auto whitespace-pre-wrap border ${
               result && !result.ok ? 'bg-red-50 border-red-200 text-red-600' : 'bg-navy-950 border-navy-800 text-green-300'
             }`}>
-              {result?.error ? `✖ ${result.error}` : (result?.output || 'Output will appear here…')}
+              {result?.error ? `✖ ${result.error}` : (result?.output || t('Output will appear here…', 'आउटपुट यहाँ दिखाई देगा…'))}
             </div>
           )}
         </div>

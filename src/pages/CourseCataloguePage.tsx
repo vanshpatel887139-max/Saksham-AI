@@ -1,6 +1,6 @@
 import Header from '../components/layout/Header';
 import { Card, Button, Badge, ProgressBar, BadgeVariant } from '../components/ui/UIComponents';
-import { useApp } from '../store/AppContext';
+import { useApp, useI18n } from '../store/AppContext';
 import { courses } from '../data/mockData';
 import { BookOpen, Star, Clock, Award, Filter, Search } from 'lucide-react';
 import { useState } from 'react';
@@ -15,6 +15,7 @@ const difficultyColors: Record<string, BadgeVariant> = {
 
 export default function CourseCataloguePage() {
   const { skillGaps, enrollInCourse, enrolledCourses } = useApp();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const { animate, staggerStyle } = useStagger();
   const [filterProvider, setFilterProvider] = useState('all');
@@ -32,18 +33,18 @@ export default function CourseCataloguePage() {
     const gaps = skillGaps.filter(g => course.skillsCovered.includes(g.competencyName));
     if (gaps.length === 0) return null;
     const mainGap = gaps.sort((a, b) => b.gap - a.gap)[0];
-    return `Recommended because your ${mainGap.competencyName} is Level ${mainGap.currentLevel}, while Level ${mainGap.requiredLevel} is required for your target role.`;
+    return `${t('Recommended because your', 'सिफ़ारिश का कारण:')} ${mainGap.competencyName} ${t('is at Level', 'का स्तर है')} ${mainGap.currentLevel}, ${t('while Level', 'जबकि स्तर')} ${mainGap.requiredLevel} ${t('is required for your target role.', 'आपके लक्षित पद के लिए आवश्यक है।')}`;
   };
 
   const isEnrolled = (id: string) => enrolledCourses.some(c => c.id === id);
 
   return (
     <div>
-      <Header title="Course Catalogue" />
+      <Header title={t('Course Catalogue', 'कोर्स सूची')} />
       <div className="p-6 space-y-6">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 stagger-fade-up" style={staggerStyle(0, animate)}>
           <div className="flex items-center gap-2">
-            <span className="px-2 py-1 bg-blue-100 text-blue-700 text-[10px] font-bold rounded">MOCK iGOT API INTEGRATION</span>
+            <span className="px-2 py-1 bg-blue-100 text-blue-700 text-[10px] font-bold rounded">{t('MOCK iGOT API INTEGRATION', 'मॉक iGOT API एकीकरण')}</span>
             <span className="px-2 py-1 bg-green-100 text-green-700 text-[10px] font-bold rounded">NSSTA TPAC</span>
           </div>
           <div className="flex items-center gap-3">
@@ -53,20 +54,20 @@ export default function CourseCataloguePage() {
                 type="text"
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search courses..."
+                placeholder={t('Search courses...', 'कोर्स खोजें...')}
                 className="pl-9 pr-3 py-2 border border-navy-200 rounded-lg text-sm w-48"
               />
             </div>
             <select value={filterProvider} onChange={e => setFilterProvider(e.target.value)} className="px-3 py-2 border border-navy-200 rounded-lg text-sm bg-white">
-              <option value="all">All Providers</option>
+              <option value="all">{t('All Providers', 'सभी प्रदाता')}</option>
               <option value="iGOT Karmayogi">iGOT Karmayogi</option>
               <option value="NSSTA">NSSTA</option>
             </select>
             <select value={filterDifficulty} onChange={e => setFilterDifficulty(e.target.value)} className="px-3 py-2 border border-navy-200 rounded-lg text-sm bg-white">
-              <option value="all">All Levels</option>
-              <option value="Beginner">Beginner</option>
-              <option value="Intermediate">Intermediate</option>
-              <option value="Advanced">Advanced</option>
+              <option value="all">{t('All Levels', 'सभी स्तर')}</option>
+              <option value="Beginner">{t('Beginner', 'शुरुआती')}</option>
+              <option value="Intermediate">{t('Intermediate', 'मध्यम')}</option>
+              <option value="Advanced">{t('Advanced', 'उन्नत')}</option>
             </select>
           </div>
         </div>
@@ -114,7 +115,7 @@ export default function CourseCataloguePage() {
                   {enrolled && enrollment ? (
                     <button onClick={() => navigate(`/courses/${course.id}`)} className="w-full text-left cursor-pointer">
                       <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-navy-500">Progress</span>
+                        <span className="text-navy-500">{t('Progress', 'प्रगति')}</span>
                         <span className="font-medium text-navy-700">{enrollment.progress}%</span>
                       </div>
                       <ProgressBar value={enrollment.progress} max={100} size="sm" showLabel={false} />
@@ -122,10 +123,10 @@ export default function CourseCataloguePage() {
                   ) : (
                     <div className="flex gap-2">
                       <Button size="sm" className="flex-1" onClick={() => navigate(`/courses/${course.id}`)}>
-                        <BookOpen size={14} className="mr-1" /> View Course
+                        <BookOpen size={14} className="mr-1" /> {t('View Course', 'कोर्स देखें')}
                       </Button>
                       <Button size="sm" variant="secondary" onClick={() => enrollInCourse(course.id)}>
-                        Enroll
+                        {t('Enroll', 'पंजीकरण करें')}
                       </Button>
                     </div>
                   )}
